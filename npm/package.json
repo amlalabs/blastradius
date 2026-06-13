@@ -1,6 +1,6 @@
 {
   "name": "@amlalabs/blastradius",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Local reachability audit for coding-agent environments (run-time binary fetch; no install hooks)",
   "author": "Amla Labs",
   "homepage": "https://github.com/amlalabs/blastradius#readme",
@@ -20,6 +20,6 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/amlalabs/blastradius"
+    "url": "git+https://github.com/amlalabs/blastradius.git"
   }
 }
