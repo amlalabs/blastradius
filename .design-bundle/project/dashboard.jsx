@@ -231,9 +231,32 @@ function FindingDetail({ id, onClose }) {
         </span>
         <span className="mono" style={{ fontSize: 12, color: "var(--txt-mid)", padding: "2px 0" }}>{f.metric}</span>
       </div>
-      <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 4 }}>
-        {f.detail.map((d, i) => <div key={i} className="mono" style={{ fontSize: 12, color: "var(--txt-mid)" }}>· {d}</div>)}
-      </div>
+      {f.why && (
+        <div style={{ marginTop: 13 }}>
+          <div className="mono" style={{ fontSize: 10, color: "var(--txt-dim)", letterSpacing: 1.5, marginBottom: 4 }}>WHY IT'S RISKY</div>
+          <div style={{ fontSize: 12.5, color: "var(--txt-mid)", lineHeight: 1.5 }}>{f.why}</div>
+        </div>
+      )}
+      {f.how && (
+        <div style={{ marginTop: 12 }}>
+          <div className="mono" style={{ fontSize: 10, color: "var(--txt-dim)", letterSpacing: 1.5, marginBottom: 4 }}>WHAT AN AGENT CAN DO</div>
+          <div style={{ fontSize: 12.5, color: "var(--txt-mid)", lineHeight: 1.5 }}>{f.how}</div>
+        </div>
+      )}
+      {f.remediation && f.remediation.length > 0 && (
+        <div style={{ marginTop: 12 }}>
+          <div className="mono" style={{ fontSize: 10, color: "var(--safe)", letterSpacing: 1.5, marginBottom: 4 }}>CONTAIN IT</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+            {f.remediation.map((r, i) => <div key={i} style={{ fontSize: 12, color: "var(--txt-mid)", lineHeight: 1.45 }}>· {r}</div>)}
+          </div>
+        </div>
+      )}
+      {f.detail && f.detail.length > 0 && (
+        <div style={{ marginTop: 12, paddingTop: 10, borderTop: "1px solid var(--line)", display: "flex", flexDirection: "column", gap: 4 }}>
+          <div className="mono" style={{ fontSize: 10, color: "var(--txt-dim)", letterSpacing: 1.5, marginBottom: 2 }}>OBSERVED</div>
+          {f.detail.map((d, i) => <div key={i} className="mono" style={{ fontSize: 12, color: "var(--txt-mid)" }}>· {d}</div>)}
+        </div>
+      )}
     </div>
   );
 }
@@ -455,6 +478,7 @@ function HowPanel({ how }) {
                 {signalLabel(h.signal)}
                 {h.count > 1 && <span style={{ color: "var(--txt-dim)" }}> ×{h.count}</span>}
               </div>
+              {h.why && <div style={{ fontSize: 11.5, color: "var(--txt-dim)", marginTop: 3, lineHeight: 1.45 }}>{h.why}</div>}
               {h.finding_ref && <div className="mono" style={{ fontSize: 11, color: "var(--safe-deep)", marginTop: 2 }}>↳ joins {h.finding_ref}</div>}
             </div>
             <span className="mono" style={{ fontSize: 12, fontWeight: 700, color: hot ? "var(--hot)" : "var(--txt-dim)" }}>
@@ -490,6 +514,9 @@ function RealToxic({ combos, picked, onPick }) {
               <span className="mono" style={{ fontSize: 10, fontWeight: 700, color: col, border: `1px solid ${col}`,
                 padding: "2px 7px", borderRadius: 5, letterSpacing: 1 }}>{String(sev).toUpperCase()}</span>
             </div>
+            {meta.derived && (
+              <div style={{ marginTop: 7, fontSize: 12.5, color: "var(--txt-mid)", lineHeight: 1.5 }}>{meta.derived}</div>
+            )}
             {sel && (c.evidence || []).length > 0 && (
               <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 5, borderTop: "1px solid var(--line)", paddingTop: 12 }}>
                 {c.evidence.map((ev, i) => <div key={i} className="mono" style={{ fontSize: 12, color: "var(--txt-mid)" }}>{ev}</div>)}

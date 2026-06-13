@@ -31,6 +31,7 @@ use crate::report::redaction::sweep;
 use crate::report::RunReport;
 use crate::session::history::HistoryAuditReport;
 
+mod impact;
 mod page;
 
 /// Options controlling how the dashboard is served.
@@ -187,6 +188,7 @@ pub fn session_cards(reports: &[crate::session::report::SessionReport]) -> Value
                         "count": count,
                         "weight_total": total,
                         "evidence": sample,
+                        "why": impact::signal_impact(&k.0).unwrap_or(""),
                     })
                 })
                 .collect();
@@ -258,7 +260,15 @@ pub fn build_data(
                         usize::from(matches!(f.severity, crate::severity::Severity::Exposed)),
                     ));
                 }
+            }
 
+            // Finding-impact teaching copy: prefer the curated per-id (why, how);
+            // fall back to the per-FindingClass copy keyed by class.to_string().
+            let class_str = f.class.to_string();
+            let (why, how) = impact::finding_impact(&f.id)
+                .unwrap_or_else(|| impact::finding_impact_class(&class_str));
+
+            if reachable {
                 // Live radius: value-free per-ring node (paths/scope/labels only).
                 let detail = format!("{} · {}", f.confidence.label(), f.scope);
                 ring_findings.entry(ring_of(f)).or_default().push(json!({
@@ -267,11 +277,15 @@ pub fn build_data(
                     "severity": f.severity.label(),
                     "metric": f.summary,
                     "detail": [detail],
+                    "class": class_str,
+                    "remediation": f.remediation,
+                    "why": why,
+                    "how": how,
                 }));
             }
             findings_json.push(json!({
                 "id": f.id,
-                "class": f.class.to_string(),
+                "class": class_str,
                 "classLabel": f.class.section_title(),
                 "scope": f.scope.to_string(),
                 "title": f.title,
@@ -279,6 +293,9 @@ pub fn build_data(
                 "severity": f.severity.label(),
                 "confidence": f.confidence.label(),
                 "reachable": reachable,
+                "remediation": f.remediation,
+                "why": why,
+                "how": how,
             }));
         }
     }

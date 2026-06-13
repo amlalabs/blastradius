@@ -99,10 +99,6 @@
     },
   ];
 
-  // Flat index of findings for joins
-  const FINDINGS = {};
-  RINGS.forEach((r) => r.findings.forEach((f) => { FINDINGS[f.id] = Object.assign({ ring: r.id }, f); }));
-
   function counts() {
     // Prefer the live scan's tallies when present.
     if (D.stats && (typeof D.stats.exposed === "number" || typeof D.stats.notable === "number")) {
@@ -126,9 +122,24 @@
         findings: (r.findings || []).map((f) => ({
           id: f.id, title: f.title, sev: f.severity,
           metric: f.metric, detail: f.detail || [],
+          // carry the live finding-impact teaching copy + containment onto the node
+          why: f.why, how: f.how, remediation: f.remediation || [], class: f.class,
         })),
       }))
     : RINGS;
+
+  // Flat index of findings for joins (FindingDetail popover, toxic-combo nodes).
+  // PREFER LIVE: iterate LIVE_RINGS first so live metric/detail/sev/why/how/
+  // remediation/class win; then fold in canonical RINGS entries only for ids NOT
+  // already present, so fixture toxic-combo node ids still resolve when served
+  // standalone or partially. Every entry keeps its `ring`.
+  const FINDINGS = {};
+  LIVE_RINGS.forEach((r) => r.findings.forEach((f) => {
+    FINDINGS[f.id] = Object.assign({ ring: r.id }, f);
+  }));
+  RINGS.forEach((r) => r.findings.forEach((f) => {
+    if (!FINDINGS[f.id]) FINDINGS[f.id] = Object.assign({ ring: r.id }, f);
+  }));
 
   // ---- Sessions (the NUMERATOR) ------------------------------------------
   // Each event carries paths/commands/hosts only — never values.
