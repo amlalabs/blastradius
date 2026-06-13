@@ -283,6 +283,8 @@ pub const PAGE: &str = r##"<!DOCTYPE html>
           metric: f.metric, detail: f.detail || [],
           // carry the live finding-impact teaching copy + containment onto the node
           why: f.why, how: f.how, remediation: f.remediation || [], class: f.class,
+          // Seam F: standardized taxonomy badge codes (empty when unmapped).
+          owasp: f.owasp || "", atlas: f.atlas || "",
         })),
       }))
     : RINGS;
@@ -1455,6 +1457,12 @@ function FindingDetail({ id, onClose }) {
         </span>
         <span className="mono" style={{ fontSize: 12, color: "var(--txt-mid)", padding: "2px 0" }}>{f.metric}</span>
       </div>
+      {(f.owasp || f.atlas) && (
+        <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
+          {f.owasp && <span className="mono" style={{ fontSize: 10, color: "var(--txt-dim)", border: "1px solid var(--line)", padding: "1px 6px", borderRadius: 4 }}>OWASP {f.owasp}</span>}
+          {f.atlas && <span className="mono" style={{ fontSize: 10, color: "var(--txt-dim)", border: "1px solid var(--line)", padding: "1px 6px", borderRadius: 4 }}>ATLAS {f.atlas}</span>}
+        </div>
+      )}
       {f.why && (
         <div style={{ marginTop: 13 }}>
           <div className="mono" style={{ fontSize: 10, color: "var(--txt-dim)", letterSpacing: 1.5, marginBottom: 4 }}>WHY IT'S RISKY</div>

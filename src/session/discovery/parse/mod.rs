@@ -5,5 +5,6 @@
 //!
 //! Every other shape is a detect-only stub in MVP (`DetectedUnparsed`).
 
+pub mod jsonl_beacon;
 pub mod jsonl_claude;
 pub mod jsonl_codex;

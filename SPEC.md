@@ -645,7 +645,7 @@ A clean, trustworthy local binary whose product is the reachable-surface invento
 > (§23.12). The **deterministic engine computes the score**; the `--ai` layer **only
 > explains already-grounded evidence — it never determines or alters the score.**
 
-### 23.1 `src/session/` module layout (the P1 engine)
+### 23.1 `src/session/` module layout
 
 A sibling of `src/probes/`, `src/analyze/`, `src/dashboard/`. It **consumes** the existing
 data model (`crate::finding::{Finding, FindingId, FindingScope}`,
@@ -661,6 +661,9 @@ src/session/
   score.rs              # deterministic additive + multiplier + escalation engine; containment sim
   toxic_combinations.rs # event(s) x finding(s) -> named security PATH (ToxicCombination)
   report.rs             # assemble SessionReport; JSON + terminal renderers (Layer-2 swept)
+  discovery/            # native transcript discovery + per-agent parsers (Layer-0 extract)
+  retro.rs              # retro-hazard: re-resolve historical combos vs today's baseline
+  history.rs            # HistoryAuditReport across discovered sessions
 ```
 
 **Pipeline (deterministic, read-only — §4.1):**
@@ -669,7 +672,7 @@ joins normalized events against a **baseline** of real `Finding`s (a prior `scan
 value-free JSON, §14, or an implicit live scan) → `toxic_combinations.rs` + `score.rs`
 derive paths and the number → `report.rs` emits the `SessionReport`. The baseline is the
 bridge to the existing tool: `classify.rs` joins against the **same `Finding` values** the
-§11–§12 probes already produce on this machine (~30 probes / ~35 credential stores).
+§11–§12 probes already produce on this machine (~35 probes / ~30 stores).
 
 ### 23.2 The JOIN — the evidence graph (the heart of the product)
 
@@ -753,9 +756,11 @@ pub struct SessionTrace {
 **Trace sources (`trace.rs`).** (1) **Claude Code transcripts** —
 `~/.claude/projects/<repo>/*.jsonl` (real tool calls; the honest default path);
 (2) a **PreToolUse hook** for *live* scoring (may optionally **BLOCK** per policy
-decision); (3) **mock fixtures** (`traces/{benign,risky}.json`). Other agents
-(Codex/Cursor) are **adapter stubs, mocked for now** — stated honestly; `agent` carries
-the real source and no adapter claims live capture it does not have.
+decision); (3) **mock fixtures** (`traces/{benign,risky}.json`). **Codex** is a
+**real parser** (`discovery/parse/jsonl_codex.rs`) alongside Claude Code; only
+**Cursor and other agents are detection-only** (discovered but not yet parsed) —
+stated honestly; `agent` carries the real source and no adapter claims live capture
+it does not have.
 
 ### 23.4 Normalization & value-free signal taxonomy (`normalize.rs`)
 
@@ -1147,7 +1152,7 @@ blastradius dashboard [--trace FILE] [--baseline FILE] [--repo PATH] [--session 
 - **Empty state.** With no `--trace`/`--baseline`, Tabs 2–3 show an empty state and Tab 1
   behaves exactly as today, so the ambient-only demo is a strict superset of current behavior.
 
-### 23.14 Two-person delivery split (frozen contract first)
+### 23.14 Two-person delivery split (frozen contract first) *(historical — the engine is now built; §24.0)*
 
 **Contract first (both, ~half a day):** freeze §23.3 (`AgentEvent` + `SessionTrace`) and
 §23.9 (`SessionReport`), commit a `traces/` fixture set (one benign, one risky), and a JSON
@@ -1163,12 +1168,13 @@ round-trip test. Neither track adds a field without updating the fixture.
   **explain-only** over the grounded `reasons[]`/`toxic_combinations[]` (narrator receives
   only the value-free `SessionReport`); the demo flow + the live meter / block banner.
 
-**Seam:** P2 depends only on the frozen `SessionReport` JSON, so P1 can stub a hand-written
-report fixture immediately and P2 builds the whole UI against it before the engine is real.
+**Seam (historical):** P2 depended only on the frozen `SessionReport` JSON, so P1 could
+stub a hand-written report fixture immediately and P2 built the UI against it before the
+engine landed. The engine is now built (§24.0); this split is recorded for provenance.
 
 ### 23.15 Demo script (`blastradius dashboard --ai`)
 
-1. **Ambient surface (unchanged).** Tab 1 — the §13.1 inventory (~30 probes / ~35 stores).
+1. **Ambient surface (unchanged).** Tab 1 — the §13.1 inventory (~35 probes / ~30 stores).
    *"This is what an agent running as you can reach. It does not change between sessions."*
    (the denominator).
 2. **Benign session → low score despite ambient authority.** Score a benign trace (reads

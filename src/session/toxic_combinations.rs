@@ -15,6 +15,19 @@ use crate::session::report::{RiskLevel, ToxicCombination};
 /// table; the engine maps tags to predicates over [`NormalizedEvent`].
 pub type EventPredicate = &'static str;
 
+/// Maturity ladder for a rule, mirroring beacon's
+/// `experimental | stable | deprecated` (Seam C). Conformance enforces that
+/// `Stable` rules carry at least one `Match` AND one `NoMatch` fixture.
+///
+/// This is an internal engine field on [`ToxicCombinationRule`]; it is **not**
+/// part of any serialized contract (`ToxicCombinationRule` has no `Serialize`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Status {
+    Experimental,
+    Stable,
+    Deprecated,
+}
+
 /// Ambient `FindingId`(s) that must be present for a rule to activate.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FindingTrigger {
@@ -43,6 +56,10 @@ pub struct ToxicCombinationRule {
     pub evidence_template: &'static str,
     /// trigger set includes an escalation finding (§23.7).
     pub escalation: bool,
+    /// maturity ladder (Seam C). Internal engine field; not serialized.
+    pub status: Status,
+    /// rule version, bumped on a deliberate logic/fixture change (Seam C).
+    pub version: u32,
 }
 
 impl ToxicCombinationRule {
@@ -84,6 +101,8 @@ fn build_catalog() -> Vec<ToxicCombinationRule> {
             derived_path: "a credential store read composes with an open egress path",
             evidence_template: "read a credential store and an egress path is reachable",
             escalation: false,
+            status: Status::Experimental,
+            version: 1,
         },
         ToxicCombinationRule {
             name: "source_control_mutation_path",
@@ -94,6 +113,8 @@ fn build_catalog() -> Vec<ToxicCombinationRule> {
             derived_path: "a git-write action composes with armed ssh-agent + push reach",
             evidence_template: "git-write action with ssh-agent and push reachability",
             escalation: false,
+            status: Status::Experimental,
+            version: 1,
         },
         ToxicCombinationRule {
             name: "post_root_host_visibility",
@@ -113,6 +134,8 @@ fn build_catalog() -> Vec<ToxicCombinationRule> {
             derived_path: "a container-runtime action composes with escalation + cross-repo reach",
             evidence_template: "container-runtime action with escalation and cross-repo reach",
             escalation: true,
+            status: Status::Experimental,
+            version: 1,
         },
         ToxicCombinationRule {
             name: "saas_session_hijack",
@@ -126,6 +149,8 @@ fn build_catalog() -> Vec<ToxicCombinationRule> {
             derived_path: "a browser session-store read composes with an open egress path",
             evidence_template: "read a browser session store and an egress path is reachable",
             escalation: false,
+            status: Status::Experimental,
+            version: 1,
         },
         ToxicCombinationRule {
             name: "production_deployment_path",
@@ -136,6 +161,8 @@ fn build_catalog() -> Vec<ToxicCombinationRule> {
             derived_path: "a deploy-workflow edit composes with likely push reach",
             evidence_template: "edited a deploy workflow and push is likely",
             escalation: false,
+            status: Status::Experimental,
+            version: 1,
         },
         ToxicCombinationRule {
             name: "high_review_risk",
@@ -147,6 +174,8 @@ fn build_catalog() -> Vec<ToxicCombinationRule> {
             derived_path: "a sensitive-code edit with no covering approval",
             evidence_template: "sensitive-code edit without a covering approval",
             escalation: false,
+            status: Status::Experimental,
+            version: 1,
         },
     ]
 }

@@ -43,6 +43,25 @@ constraints.
 
 ---
 
+## 0.1 Implementation status (as shipped on `main`)
+
+After an honest review, the integration was trimmed to what earns its weight:
+
+- **Shipped & kept:** Stage 0 (doc reconciliation), Stage C (conformance harness +
+  per-rule fixtures + maturity/version), Stage F (OWASP-LLM/MITRE-ATLAS taxonomy
+  badges), Stage D (passive `runtime.jsonl` ingestion, marker-gated/off-by-absence).
+- **Pruned as unwired speculation:** **Stage A (`beacon_view.rs` export)** — wired to
+  no consumer and lossy by design — and **Stage B's `event_order` machinery** — `None`
+  on every rule, i.e. a no-op. Both were removed; the Seam A/B designs below are
+  retained as record. Revisit only with a committed consumer (Seam A) or a rule that
+  actually needs ordering + fixtures (Seam B).
+
+The net keeps the genuine wins (rule-regression fixtures, recognized taxonomy labels,
+optional beacon telemetry ingestion) without carrying dead code. The static
+reachability scanner — the product's asset — was untouched throughout.
+
+---
+
 ## 1. Ground truth: agent-beacon Threat Rules
 
 ### 1.1 Rule format (`pkg/asymptoteobserve/threatrules/rule.go`, `spec/threat-rules/`)
@@ -333,13 +352,18 @@ fixtures-per-rule + conformance gate + maturity ladder + pinned version — but
 - **C3.** Phase the build-failing gate to where engine logic is real: seed it on the
   6 toxic rules whose `evaluate()` is implemented; expand to Stage-A/B signal rules
   as coverage lands. (Avoid a gate over not-yet-real logic blocking the build.)
-- **C4.** **Extend the gate to the authored-impact layer** (`impact.rs`, commit
-  `0368556`). beacon's maturity ladder maps naturally onto the explanation layer: a
-  finding/signal at `stable` MUST have hand-authored `(why, how)` — **not** the
-  per-class fallback. Add a test asserting `finding_impact(id).is_some()` for every
-  catalog `FindingId` and `signal_impact(name).is_some()` for every `Signal` name,
-  so a new id can never silently ship on fallback copy. Nearly free; keeps the
-  "no generic text" promise from the commit enforced by CI rather than by vigilance.
+- **C4.** **Extend the gate to the authored-impact layer (`impact.rs`) — SOFT only.**
+  **[REGRESSION-VERIFIED]** A *strict* gate ("every emitted `FindingId` has a
+  bespoke `finding_impact` arm") goes **RED on today's data**: `cross_repo.dotenv`,
+  `git.config_exec_directives`, and `claude_code.project_tool_surface` are emitted
+  but rely on the class fallback. So ship the **soft** gate: assert every *emitted*
+  `FindingId` resolves to non-empty `(why, how)` via
+  `finding_impact(id).or(finding_impact_class(class))`, and every `Signal` has
+  `signal_impact(name)` (all 9 covered today). **Source the id universe from
+  probe-emitted ids (a registry/scan), never from `classify::candidate_ids`** —
+  that list contains a phantom `process.sandbox_reach` no probe emits, which would
+  also turn the gate red. Defer the strict per-id-bespoke variant until those three
+  ids get hand-authored pairs.
 
 **[CORRECTION] Reject shared YAML — for the right reason.** The first pass justified
 Rust-native by "avoids a `serde_yaml` dep." **`serde_yaml 0.9` is already a direct
@@ -353,7 +377,14 @@ Effort: **M**.
 
 ### Seam D — `beacon scan --json` shell-out as a live source — **DROP**
 
-Shelling out to the Go `beacon` binary is **rejected**. Grounded reasons:
+Shelling out to the Go `beacon` binary is **rejected** — and **[UPDATE]** this holds
+even though the single-binary/brand objection has been *relaxed* by the user
+("fine with shelling out"). The regression workflow found that the **passive
+file-read variant (5b) dominates the subprocess (5a) on the user's own two axes**:
+5b is *both* lower friction (a parser, no subprocess/absent-binary/version-skew
+handling) *and* lower regression risk (no nondeterminism imported from beacon's
+mutable rule pack). So "shell-out is allowed" does not make shell-out the right
+call; the file reader wins regardless. Grounded reasons the subprocess loses:
 
 1. **Narrower source.** `beacon scan` reads beacon's own `runtime.jsonl` (presumes
    beacon installed as collector). `discovery/` already parses 14 agents' native
@@ -414,6 +445,16 @@ detail. Value-free by construction — these are public standard labels, not sec
 - **F2.** Keep blastradius's authored `(why, how)` authoritative; taxonomy is an
   *additional badge*, never a replacement for the reachability-framed prose, and the
   beacon `emit.reason` is **not** imported (it is intent-framed and terser).
+- **F3.** **[REGRESSION-VERIFIED] Use a parallel accessor, do NOT widen the tuple.**
+  Add `finding_taxonomy(id) -> Option<…>`; do **not** change
+  `finding_impact() -> Option<(&str,&str)>` — three `impact.rs` tests
+  (`known_id_has_copy`, `unknown_id_is_none`, `class_fallback_covers_every_class`)
+  and the call site `mod.rs:268` destructure `let (why, how) = …` and would break.
+- **F4.** Insert the new keys into **both** `json!` blocks in `build_data`
+  (ring node `mod.rs:274` **and** findings node `mod.rs:286`) for parity, and use
+  only short codes (`LLM05`, `AML.T0011`) — never secret-shaped — so
+  `page_has_sections_and_is_swept` (`contains_secret_shaped` over final HTML) stays
+  green. Never touch `src/report/json.rs` (keeps `schema_version` 1.0 frozen).
 
 Effort: **S** (data entry + a render slot).
 
@@ -448,6 +489,60 @@ Every constraint and the *mechanism* (not aspiration) that upholds it:
 Recommended order: **0 → 1 → 2 → 3**, with 4 recorded as a deliberate non-goal and
 5 as optional polish. The impact-coverage gate (C4) and Stage 5 both build on the
 `0368556` why/how layer, so they pair naturally once Stage 1 lands.
+
+### 6.1 Least-friction, zero-regression execution (regression-validated)
+
+Validated against the actual **177-test** suite and the frozen contracts by a
+dedicated regression workflow (baseline → friction×regression per action →
+adversarial regression hunt). The single most important cross-cutting finding:
+
+> **No do-now action can change a default `scan`/`dashboard` run.** `discover_sessions`
+> is reached only on the `sessions` / `audit-history` / `dashboard` *session* paths;
+> the probe-scan/dashboard path calls `build_data(&report, …, None, None)`. All
+> beacon-facing work is therefore additive to a code path default scans never touch.
+
+**DO-NOW (least friction, zero/managed regression):**
+
+| # | Action | Friction | Regression | The catch (from the hunt) |
+|---|---|---|---|---|
+| 0 | **Doc reconciliation** (SPEC + `mod.rs:14`) | S | none | docs only; list of false claims below |
+| 3 | **`beacon_view` projection — LIBRARY + TEST-ONLY** (no CLI, no `lib.rs` wiring) | M | none | canary MUST plant a secret in `ShellCommand.command` (the *retained* `join_key`), not only dropped fields, or coverage is vacuous; omit per-event timestamps (no clock) |
+| 2a | **Conformance + maturity + `RULE_PACK_VERSION`** (all 6 rules `status=experimental`) | M | managed | new internal fields on `ToxicCombinationRule` (not the frozen `report::ToxicCombination`); fixtures authored fresh → pass by construction; keep `catalog().len()==6` |
+| 2b | **Impact-coverage gate — SOFT** (C4) | S | managed | strict gate is **RED today**; use `finding_impact().or(class_fallback)` over *emitted* ids only (see C4) |
+| 6 | **Taxonomy enrichment** (parallel accessor, both `json!` blocks) | S | managed | do **not** widen the `(why,how)` tuple; short codes only (F3/F4) |
+
+**DEFER:**
+
+| # | Action | Why defer |
+|---|---|---|
+| 4 | Ordered-correlation plumbing | Dead-plumbing until a rule actually flips to ordered. The `event_trigger_matched → event_trigger_ixs` refactor MUST keep `evaluate()` byte-identical (the tests-contracts hunt flagged this as the one refactor landmine). Lower-friction half: add `event_trigger_ixs` + a bool wrapper, skip the `event_order` field until a real ordered rule + fixtures exist. |
+| 5 | Consume beacon as a source | If/when wanted, use **5b passive file reader** (`parse/jsonl_beacon.rs` over `runtime.jsonl`, marker-gated, off-by-absence, **no CLI flag** — a flag risks `removed_flags_are_rejected`), routed through the same `normalize`+`classify`+Layer-0 redaction. **Never 5a shell-out** (§ Seam D). |
+
+**Stage 0 — the actual stale claims to fix** (everything else in SPEC is accurate or
+legitimately post-MVP — leave the `score` command, `--hook`/PreToolUse block, live
+`session -- <cmd>` wrap, three-tab single-trace view, `--compare-ax`, and
+non-Claude/non-Codex parsers labeled as unbuilt):
+
+1. `src/session/mod.rs:14-16` — the `SCAFFOLD STATUS … logic-bearing functions
+   return empty/default values` comment is **flatly false** (all implemented; ~54
+   passing module tests). Replace with a one-line "implemented" note. *(Highest
+   priority — it actively misleads readers/agents, including this analysis at first.)*
+2. SPEC §23.4 (line ~757): "Codex/Cursor are adapter stubs, mocked for now" — **false
+   for Codex** (`parse/jsonl_codex.rs` is a real parser); only Cursor/others are
+   detect-only.
+3. SPEC §23.1 (lines ~648-664): the "(the P1 engine)" label + module list omit the
+   shipped `discovery/`, `retro.rs`, `history.rs`.
+4. SPEC §23.14 (lines ~1166-1167): future-tense "before the engine is real" delivery
+   split reads as not-yet-built — mark historical.
+5. SPEC lines ~672 and ~1171: "~30 probes / ~35 credential stores" transposes the
+   frozen dashboard constant `{probes:35, stores:30}` (`dashboard/mod.rs:354`) —
+   should read "~35 probes / ~30 stores".
+
+**Frozen contracts no do-now action may move** (regression tripwires): `schema_version`
+`1.0` (`json.rs`); `SessionReport`/`SessionTrace`/`AgentEvent` serde shapes;
+`catalog().len()==6`; `RING_ORDER` (6 rings, fixed); the canary renderer list;
+`removed_flags_are_rejected`; the risky-fixture `risk_score==100` snapshot;
+`determinism_byte_identical`. New work adds *new* fields/modules/tests only.
 Stages are independent enough to land separately; none introduces a dependency.
 
 ---

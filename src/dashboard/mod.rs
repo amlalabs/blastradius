@@ -31,7 +31,7 @@ use crate::report::redaction::sweep;
 use crate::report::RunReport;
 use crate::session::history::HistoryAuditReport;
 
-mod impact;
+pub mod impact;
 mod page;
 
 /// Options controlling how the dashboard is served.
@@ -267,6 +267,10 @@ pub fn build_data(
             let class_str = f.class.to_string();
             let (why, how) = impact::finding_impact(&f.id)
                 .unwrap_or_else(|| impact::finding_impact_class(&class_str));
+            // Seam F: parallel standardized taxonomy badge (OWASP-LLM /
+            // MITRE-ATLAS) for findings that map to a beacon rule. Empty when
+            // None so both json! blocks stay parity-shaped and value-free.
+            let (owasp, atlas) = impact::finding_taxonomy(&f.id).unwrap_or(("", ""));
 
             if reachable {
                 // Live radius: value-free per-ring node (paths/scope/labels only).
@@ -281,6 +285,8 @@ pub fn build_data(
                     "remediation": f.remediation,
                     "why": why,
                     "how": how,
+                    "owasp": owasp,
+                    "atlas": atlas,
                 }));
             }
             findings_json.push(json!({
@@ -296,6 +302,8 @@ pub fn build_data(
                 "remediation": f.remediation,
                 "why": why,
                 "how": how,
+                "owasp": owasp,
+                "atlas": atlas,
             }));
         }
     }
@@ -553,6 +561,45 @@ mod tests {
         assert!(html.contains("<!doctype html>") || html.contains("<!DOCTYPE html>"));
         // No secret-shaped content.
         assert!(!crate::report::redaction::contains_secret_shaped(&html));
+    }
+
+    #[test]
+    fn build_data_emits_taxonomy_keys_in_both_blocks() {
+        // Seam F: owasp/atlas keys are present (and parity-shaped) in BOTH the
+        // ring-node block and the flat findings block. The dummy
+        // aws.credentials.profiles maps to a beacon rule, so codes are non-empty.
+        let report = dummy_report();
+        let data = build_data(&report, &Ok(None), None, None);
+
+        // Flat findings node.
+        let f = data["findings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|f| f["id"] == "aws.credentials.profiles")
+            .expect("aws finding in flat list");
+        assert!(f.get("owasp").is_some(), "owasp key present in findings node");
+        assert!(f.get("atlas").is_some(), "atlas key present in findings node");
+        assert_eq!(f["owasp"].as_str().unwrap(), "LLM06");
+        assert_eq!(f["atlas"].as_str().unwrap(), "AML.T0024");
+
+        // Ring node (cloud ring carries the same finding).
+        let cloud = data["rings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|r| r["id"] == "cloud")
+            .unwrap();
+        let rf = cloud["findings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|f| f["id"] == "aws.credentials.profiles")
+            .expect("aws finding in cloud ring");
+        assert!(rf.get("owasp").is_some(), "owasp key present in ring node");
+        assert!(rf.get("atlas").is_some(), "atlas key present in ring node");
+        assert_eq!(rf["owasp"], f["owasp"], "owasp parity across blocks");
+        assert_eq!(rf["atlas"], f["atlas"], "atlas parity across blocks");
     }
 
     #[test]

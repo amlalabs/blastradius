@@ -367,6 +367,86 @@ pub fn finding_impact_class(class: &str) -> (&'static str, &'static str) {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Seam F — standardized taxonomy enrichment (OWASP-LLM / MITRE-ATLAS).
+//
+// These are SHORT public-standard codes only (e.g. "LLM05", "AML.T0011") —
+// never secret-shaped, value-free by construction. They are PARALLEL metadata:
+// the authored `(why, how)` copy above stays authoritative; a taxonomy code is
+// only an additional badge, never a replacement for the reachability-framed
+// prose. The codes are VENDORED here as committed Rust consts, cross-referenced
+// to the agent-beacon rule that expresses the same pattern, as of the
+// `agent-beacon` submodule at v0.0.60 (`v0.0.60-3-ged012e0`). They are NOT read
+// from the live submodule at build/test time (that would couple a Rust release
+// to a Go checkout). Not auto-synced — update by hand if the beacon corpus moves.
+//
+// Pair shape: (owasp_llm, mitre_atlas).
+
+// beacon rule `credential-file-read` taxonomy: { owasp_llm: LLM06, mitre_atlas: AML.T0024 }
+const TX_CREDENTIAL_FILE_READ: (&str, &str) = ("LLM06", "AML.T0024");
+// beacon rule `browser-session-store-read` taxonomy: { owasp_llm: LLM06, mitre_atlas: AML.T0024 }
+const TX_BROWSER_SESSION_READ: (&str, &str) = ("LLM06", "AML.T0024");
+// beacon rule `secret-read-then-egress` (context-exfiltration) taxonomy: { owasp_llm: LLM02, mitre_atlas: AML.T0024 }
+const TX_SECRET_EGRESS: (&str, &str) = ("LLM02", "AML.T0024");
+// beacon rule `external-mcp-tool-call` taxonomy: { owasp_llm: LLM06, mitre_atlas: AML.T0053 }
+const TX_EXTERNAL_MCP: (&str, &str) = ("LLM06", "AML.T0053");
+// beacon rule `cicd-pipeline-file-modified` (sensitive-edit) taxonomy: { owasp_llm: LLM05, mitre_atlas: AML.T0018 }
+const TX_CICD_MODIFIED: (&str, &str) = ("LLM05", "AML.T0018");
+// beacon rule `auth-security-code-modified` (sensitive-edit) taxonomy: { owasp_llm: LLM05, mitre_atlas: AML.T0018 }
+const TX_AUTH_CODE_MODIFIED: (&str, &str) = ("LLM05", "AML.T0018");
+// beacon rule `dependency-manifest-modified` (sensitive-edit) taxonomy: { owasp_llm: LLM05, mitre_atlas: AML.T0018 }
+const TX_DEPENDENCY_MODIFIED: (&str, &str) = ("LLM05", "AML.T0018");
+// beacon rule `curl-pipe-to-shell` (risky-command) taxonomy: { owasp_llm: LLM02, mitre_atlas: AML.T0011 }
+const TX_RISKY_COMMAND: (&str, &str) = ("LLM02", "AML.T0011");
+// beacon rule `git-config-exec-injection` (source-control) taxonomy: { owasp_llm: LLM05, mitre_atlas: AML.T0011 }
+const TX_GIT_CONFIG_EXEC: (&str, &str) = ("LLM05", "AML.T0011");
+
+/// Standardized (owasp_llm, mitre_atlas) short-code pair for a finding id whose
+/// pattern maps to an agent-beacon rule. `None` when no beacon rule expresses
+/// the same pattern (most reachability findings have no beacon analog — the JOIN
+/// is the moat). PARALLEL to [`finding_impact`]: it does NOT widen that tuple.
+pub fn finding_taxonomy(id: &str) -> Option<(&'static str, &'static str)> {
+    let pair = match id {
+        // Credential-store reads → beacon credential-access / context-exfiltration.
+        "aws.credentials.profiles"
+        | "aws.sso_cache"
+        | "azure.credentials"
+        | "gcp.credentials"
+        | "vault.token"
+        | "git.credential_store"
+        | "ssh.private_keys"
+        | "gpg.private_keys"
+        | "keyring.secret_store"
+        | "cross_repo.dotenv.current"
+        | "cross_repo.dotenv.siblings"
+        | "cross_repo.lateral_secrets" => TX_CREDENTIAL_FILE_READ,
+        "browser.session_stores" => TX_BROWSER_SESSION_READ,
+        // Outbound egress path → beacon secret-read-then-egress.
+        "egress.connectivity" | "egress.mediation" => TX_SECRET_EGRESS,
+        // Repo git config that executes code → beacon git-config-exec-injection.
+        "git.config_exec_directives.local" => TX_GIT_CONFIG_EXEC,
+        _ => return None,
+    };
+    Some(pair)
+}
+
+/// Standardized (owasp_llm, mitre_atlas) short-code pair for a session signal
+/// name whose pattern maps to an agent-beacon rule. `None` otherwise. Same
+/// vendored-const contract as [`finding_taxonomy`].
+pub fn signal_taxonomy(name: &str) -> Option<(&'static str, &'static str)> {
+    let pair = match name {
+        "read_secret" => TX_CREDENTIAL_FILE_READ,
+        "network_access" => TX_SECRET_EGRESS,
+        "dangerous_shell_pattern" => TX_RISKY_COMMAND,
+        "external_mcp_call" => TX_EXTERNAL_MCP,
+        "modified_production_deploy" => TX_CICD_MODIFIED,
+        "edited_auth_payment_security_code" => TX_AUTH_CODE_MODIFIED,
+        "modified_dependency_manifest" => TX_DEPENDENCY_MODIFIED,
+        _ => return None,
+    };
+    Some(pair)
+}
+
 /// One-line "why" for each session signal id. `None` when the signal has no copy.
 pub fn signal_impact(signal: &str) -> Option<&'static str> {
     let why = match signal {
@@ -422,5 +502,43 @@ mod tests {
         assert!(signal_impact("read_secret").is_some());
         assert!(signal_impact("human_approved_risky_action").is_some());
         assert!(signal_impact("nope").is_none());
+    }
+
+    #[test]
+    fn taxonomy_short_codes_present_and_missing() {
+        // A mapped finding returns short, non-secret-shaped public codes.
+        let (owasp, atlas) = finding_taxonomy("aws.credentials.profiles").expect("mapped id");
+        assert!(owasp.starts_with("LLM"));
+        assert!(atlas.starts_with("AML.T"));
+        // Egress maps too (the exfiltration leg).
+        assert!(finding_taxonomy("egress.connectivity").is_some());
+        // An unmapped reachability finding has no beacon analog → None.
+        assert!(finding_taxonomy("host.privilege_escalation").is_none());
+        assert!(finding_taxonomy("totally.made.up").is_none());
+
+        // Signal taxonomy parallel accessor.
+        let (sowasp, satlas) = signal_taxonomy("dangerous_shell_pattern").expect("mapped signal");
+        assert_eq!((sowasp, satlas), ("LLM02", "AML.T0011"));
+        assert!(signal_taxonomy("human_approved_risky_action").is_none());
+    }
+
+    #[test]
+    fn taxonomy_codes_are_never_secret_shaped() {
+        // Every vendored code must be a short public label, never secret-shaped,
+        // so the dashboard's contains_secret_shaped sweep stays green.
+        let ids = [
+            "aws.credentials.profiles",
+            "browser.session_stores",
+            "egress.connectivity",
+            "git.config_exec_directives.local",
+            "cross_repo.dotenv.current",
+        ];
+        for id in ids {
+            if let Some((owasp, atlas)) = finding_taxonomy(id) {
+                assert!(!crate::report::redaction::contains_secret_shaped(owasp));
+                assert!(!crate::report::redaction::contains_secret_shaped(atlas));
+                assert!(owasp.len() <= 8 && atlas.len() <= 12);
+            }
+        }
     }
 }

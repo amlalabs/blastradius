@@ -325,7 +325,7 @@ fn read_bounded(path: &Path, max_bytes: u64) -> Option<(String, bool)> {
 /// re-dispatched by content; an unrecognized shape downgrades to `None`
 /// (→ `DetectedUnparsed("format drift")`).
 fn identify_and_parse(spec: &AgentSpec, session_id: &str, contents: &str) -> Option<SessionTrace> {
-    use parse::{jsonl_claude, jsonl_codex};
+    use parse::{jsonl_beacon, jsonl_claude, jsonl_codex};
     match spec.source_kind {
         SourceKind::JsonlClaude => {
             // Re-dispatch a Codex rollout dropped into a Claude dir.
@@ -335,6 +335,7 @@ fn identify_and_parse(spec: &AgentSpec, session_id: &str, contents: &str) -> Opt
             jsonl_claude::parse(session_id, spec.agent_tag, contents)
         }
         SourceKind::JsonlCodex => jsonl_codex::parse(session_id, contents),
+        SourceKind::JsonlBeacon => jsonl_beacon::parse(session_id, contents),
         // Every other kind has no MVP parser; the caller already routed these to
         // DetectedUnparsed via `unparsed_reason`, so this is unreachable in
         // practice — return None to be safe.

@@ -33,6 +33,20 @@ static AGENTS: &[AgentSpec] = &[
         unparsed_reason: "",
     },
     AgentSpec {
+        // Seam D passive file-reader (variant 5b): read agent-beacon's own
+        // runtime JSONL. Marker-gated on `.beacon/endpoint` and off-by-absence —
+        // when beacon is not installed, `marker_present` is false and discovery
+        // is a no-op (no default scan/dashboard/sessions output changes). Routed
+        // through the SAME normalize+classify JOIN as every other agent; never a
+        // subprocess (`beacon scan` shell-out is dropped, §Seam D).
+        agent_tag: "beacon",
+        roots: &[Root::Home],
+        discovery_marker: ".beacon/endpoint",
+        transcript_glob: ".beacon/endpoint/runtime.jsonl",
+        source_kind: SourceKind::JsonlBeacon,
+        unparsed_reason: "",
+    },
+    AgentSpec {
         agent_tag: "factory",
         roots: &[Root::Home],
         discovery_marker: ".factory",
@@ -144,6 +158,13 @@ mod tests {
 
         let codex = agents().iter().find(|a| a.agent_tag == "codex").unwrap();
         assert!(codex.unparsed_reason.is_empty());
+
+        // Beacon (Seam D passive file-reader) is a real parser, marker-gated on
+        // `.beacon/endpoint` so it is off-by-absence when beacon is not installed.
+        let beacon = agents().iter().find(|a| a.agent_tag == "beacon").unwrap();
+        assert!(beacon.unparsed_reason.is_empty());
+        assert_eq!(beacon.discovery_marker, ".beacon/endpoint");
+        assert_eq!(beacon.source_kind, SourceKind::JsonlBeacon);
 
         // Everything else is honestly detect-only in MVP.
         let cursor = agents().iter().find(|a| a.agent_tag == "cursor").unwrap();

@@ -23,6 +23,7 @@ use crate::severity::{Confidence, Severity};
 pub enum SourceKind {
     JsonlClaude,
     JsonlCodex,
+    JsonlBeacon,
     JsonlCopilot,
     JsonlCursor,
     JsonlAntigravity,
