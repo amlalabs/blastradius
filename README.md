@@ -2,6 +2,10 @@
 
 A local diagnostic that shows what a coding agent running as you can reach.
 
+> **Just want to run it?** See **[RUNNING.md](RUNNING.md)** — build, scan,
+> dashboard, and the AI setup, copy-pasteable. TL;DR:
+> `cargo build --release && ./target/release/blastradius dashboard --ai`
+
 ## Why this exists
 
 Worktrees are not security boundaries. Coding agents inherit ambient authority —
@@ -25,26 +29,43 @@ Release binaries and `SHA256SUMS` are also published on GitHub Releases for manu
 
 ## What it checks
 
-Credentials — cloud & cluster stores (AWS profiles + **SSO/CLI token caches** ·
-GCP · Azure · Kubernetes config + **in-pod service-account token** · Docker &
-podman registry auth · HashiCorp Vault), package/registry tokens (npm · PyPI ·
-Cargo · Terraform), database & signing creds (`.pgpass` · GPG keys), the **OS
-keyring / Secret Service** (GNOME Keyring · KWallet · macOS Keychain),
-**SaaS CLI tokens** (Vercel · Netlify · Fly · doctl · Sentry · …), the agent's
-**own AI-assistant credentials**, SSH private keys and a reachable **ssh-agent**
-(loaded keys usable without the key files), **browser cookie jars & saved
-passwords** (session hijack past password+MFA), GitHub/git credential sources
-(incl. XDG path), secret-named env vars, shell- and **DB/REPL-client** history
-token patterns · cross-repo exposure (sibling repos, lateral `.env`/key files) ·
-git remotes + push likelihood + dangerous git-config directives (`alias`/
-`sshCommand`/`fsmonitor`/filters/`insteadOf`) · writable Claude Code control &
-instruction surface (`settings.json`, `.mcp.json`, `CLAUDE.md`) · build/data/
-secrets-manager creds (Maven · Gradle · Composer · RubyGems · pip · NuGet · dbt ·
-Databricks · Snowflake · SOPS/age · Teleport · password managers · rclone · …) ·
-**privilege escalation** (docker-group / NOPASSWD sudo → root) · **process memory
-introspection** (`ptrace_scope` → dump ssh-agent/browser/password-manager RAM) ·
-secrets in other processes' command lines · **reachable localhost datastores** ·
-cron / systemd-timer & editor/login persistence · outbound egress.
+Grouped by finding class:
+
+**Credentials**
+
+- **Cloud & cluster** — AWS profiles + SSO/CLI token caches, GCP, Azure,
+  Kubernetes config + in-pod service-account token, Docker & podman registry
+  auth, HashiCorp Vault
+- **Package / registry / build** — npm, PyPI, Cargo, Terraform, Maven, Gradle,
+  Composer, RubyGems, pip, NuGet
+- **Data & secrets tooling** — dbt, Databricks, Snowflake, `.pgpass`, GPG keys,
+  SOPS/age, Teleport, password managers, rclone
+- **OS keyring / Secret Service** — GNOME Keyring, KWallet, macOS Keychain
+- **SaaS & agent tokens** — SaaS CLI tokens (Vercel, Netlify, Fly, doctl,
+  Sentry, …) and the agent's own AI-assistant credentials
+- **SSH** — private keys and a reachable ssh-agent (loaded keys usable without
+  the key files)
+- **Browser** — cookie jars & saved passwords (session hijack past password+MFA)
+- **Other** — GitHub/git credential sources (incl. XDG path), secret-named env
+  vars, and shell- / DB-REPL-client history token patterns
+
+**Cross-repo** — sibling repos and lateral `.env` / key / secret files.
+
+**Git write** — remotes + push likelihood, and dangerous git-config directives
+(`alias`, `sshCommand`, `fsmonitor`, content filters, `insteadOf`).
+
+**Process & host** — privilege escalation (docker group / NOPASSWD sudo → root),
+the post-escalation "if root" blast radius, process-memory introspection
+(`ptrace_scope` → dump ssh-agent / browser / password-manager RAM), secrets in
+other processes' command lines, and reachable localhost datastores.
+
+**Persistence** — writable Claude Code control & instruction surface
+(`settings.json`, `.mcp.json`, `CLAUDE.md`), shell rc / editor / login dotfiles,
+`$PATH` shadowing, git hooks, build/CI/dev-env exec sinks, and cron / systemd
+timers.
+
+**Egress** — outbound reachability (DNS + TLS), proxy mediation, and
+cloud-metadata reachability (opt-in).
 
 The credential-store checks are **spec-driven** (~35 stores): each is a data
 entry, so adding one is a few lines — see `src/probes/registry.rs`. The full
@@ -87,7 +108,7 @@ content, or env value is ever transmitted**. The key is read from
 Scenarios are conceptual blast-radius narratives with containment, not exploit
 code. `--offline` disables it.
 
-### Network egress probe
+## Network egress probe
 
 By default, blastradius resolves a well-known hostname and opens a single TLS
 connection to a major always-available anycast endpoint (default `1.1.1.1:443`).
