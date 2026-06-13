@@ -100,7 +100,9 @@ fn run_scan(args: ScanArgs, mode: &str, force_report: bool) -> Result<i32> {
         ContextLabel::Cwd
     };
     let ctx = Context::build(label, cwd, limits, options.clone());
-    let findings = run_all(&ctx, &default_probes());
+    let findings = util::progress::spin("scanning reachable surface", || {
+        run_all(&ctx, &default_probes())
+    });
 
     let report = RunReport {
         mode: mode.to_string(),
@@ -157,7 +159,8 @@ fn run_compare(args: CompareArgs) -> Result<i32> {
         limits.clone(),
         options.clone(),
     );
-    let root_findings = run_all(&root_ctx, &default_probes());
+    let root_findings =
+        util::progress::spin("scanning repo root", || run_all(&root_ctx, &default_probes()));
 
     // Worktree context — same env snapshot, same discovery_roots, different cwd.
     let wt = worktree::Worktree::create(&main_root, false)?;
@@ -167,7 +170,8 @@ fn run_compare(args: CompareArgs) -> Result<i32> {
     // The worktree's CurrentRepo scans target its own checkout (at HEAD), while
     // discovery_roots and env are intentionally inherited unchanged (§12.8, §13).
     wt_ctx.checkout_root = Some(wt.path().to_path_buf());
-    let wt_findings = run_all(&wt_ctx, &default_probes());
+    let wt_findings =
+        util::progress::spin("scanning worktree", || run_all(&wt_ctx, &default_probes()));
 
     let comparison = diff::compare(&root_findings, &wt_findings);
 
@@ -259,7 +263,9 @@ fn run_dashboard(args: DashboardArgs) -> Result<i32> {
         ContextLabel::Cwd
     };
     let ctx = Context::build(label, cwd, limits, options.clone());
-    let findings = run_all(&ctx, &default_probes());
+    let findings = util::progress::spin("scanning reachable surface", || {
+        run_all(&ctx, &default_probes())
+    });
 
     // Optional AI analysis — the ONE thing that sends data off-machine. Opt-in,
     // value-free, with an explicit disclosure of exactly what is transmitted.
@@ -297,21 +303,31 @@ fn run_dashboard(args: DashboardArgs) -> Result<i32> {
     let (history, sessions) = {
         let baseline = findings.clone();
         let cfg = discovery_config();
-        let (traces, diagnostics) = discover_traces_and_diagnostics(&cfg);
+        let (traces, diagnostics) = util::progress::spin(
+            "reading agent transcripts (all agents, all time)",
+            || discover_traces_and_diagnostics(&cfg),
+        );
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map(|d| d.as_secs())
             .unwrap_or(0);
-        let report =
-            crate::session::history::build_history_report(&baseline, &traces, now, diagnostics);
+        // §23/§24: score every session, rank the top 10, and join historical
+        // hazards against today's surface — the slow pass over all transcripts.
+        let (report, ranked) = util::progress::spin(
+            &format!("scoring {} sessions + retro-hazards", traces.len()),
+            || {
+                let report = crate::session::history::build_history_report(
+                    &baseline, &traces, now, diagnostics,
+                );
+                let ranked = crate::session::report::rank_sessions(&traces, &baseline, 10);
+                (report, ranked)
+            },
+        );
         let live = report
             .hazards
             .iter()
             .filter(|h| matches!(h.status, crate::session::retro::HazardStatus::StillReachable))
             .count();
-        // §23 session-score section: rank the discovered sessions by blast-radius
-        // score and render the top 10, each showing HOW it's risky (value-free).
-        let ranked = crate::session::report::rank_sessions(&traces, &baseline, 10);
         let top = ranked.first().map(|r| r.risk_score).unwrap_or(0);
         eprintln!(
             "  ▸ retro-hazard scan: {} transcript(s) → {} ranked hazard(s), {} still reachable; \
@@ -469,7 +485,9 @@ fn run_baseline_scan() -> Result<Vec<finding::Finding>> {
         ContextLabel::Cwd
     };
     let ctx = Context::build(label, cwd, limits, options);
-    Ok(run_all(&ctx, &default_probes()))
+    Ok(util::progress::spin("scanning reachable surface", || {
+        run_all(&ctx, &default_probes())
+    }))
 }
 
 /// Load a baseline `Vec<Finding>` from a prior `scan`/`compare` JSON report
@@ -558,7 +576,10 @@ fn run_audit_history(args: AuditHistoryArgs) -> Result<i32> {
 
     // 2. Discover ALL historical traces (every agent, all time; value-free).
     let cfg = discovery_config();
-    let (traces, diagnostics) = discover_traces_and_diagnostics(&cfg);
+    let (traces, diagnostics) = util::progress::spin(
+        "reading agent transcripts (all agents, all time)",
+        || discover_traces_and_diagnostics(&cfg),
+    );
 
     // 3. Retro join + report assembly. Every ranked hazard is shown (no filtering
     //    or top-N truncation) so the full picture is always visible.
@@ -566,7 +587,10 @@ fn run_audit_history(args: AuditHistoryArgs) -> Result<i32> {
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0);
-    let report = build_history_report(&baseline, &traces, now, diagnostics);
+    let report = util::progress::spin(
+        &format!("scoring {} sessions + retro-hazards", traces.len()),
+        || build_history_report(&baseline, &traces, now, diagnostics),
+    );
 
     // 5. Render.
     let want_json = args.report || args.json || (args.output.is_some() && !args.markdown);

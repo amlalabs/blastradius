@@ -156,6 +156,14 @@ Key facts that constrain the integration:
   test (`report.rs::canary_does_not_leak_through_session_renderers`) that iterates
   exactly `[render_terminal, render_json]`. Any *new* egress path is not covered
   until explicitly added to that loop.
+- **Authored impact layer** (`src/dashboard/impact.rs`, commit `0368556`):
+  `finding_impact(id) -> (why, how)` for all **78 FindingIds** and
+  `signal_impact(signal) -> why` for all **9 Signal names** — hand-authored,
+  value-free, reachability-framed, **engine-owned** (per-class fallback only as a
+  safety net for future ids). **It is keyed by the Rust `FindingId` + `Signal`-name
+  taxonomy — the same identity the JOIN (`classify.rs`) and the toxic catalog use.**
+  This is independent evidence that the event taxonomy must stay bespoke: making
+  rules CEL/YAML-keyed would orphan the entire hand-authored explanation layer.
 
 ---
 
@@ -325,6 +333,13 @@ fixtures-per-rule + conformance gate + maturity ladder + pinned version — but
 - **C3.** Phase the build-failing gate to where engine logic is real: seed it on the
   6 toxic rules whose `evaluate()` is implemented; expand to Stage-A/B signal rules
   as coverage lands. (Avoid a gate over not-yet-real logic blocking the build.)
+- **C4.** **Extend the gate to the authored-impact layer** (`impact.rs`, commit
+  `0368556`). beacon's maturity ladder maps naturally onto the explanation layer: a
+  finding/signal at `stable` MUST have hand-authored `(why, how)` — **not** the
+  per-class fallback. Add a test asserting `finding_impact(id).is_some()` for every
+  catalog `FindingId` and `signal_impact(name).is_some()` for every `Signal` name,
+  so a new id can never silently ship on fallback copy. Nearly free; keeps the
+  "no generic text" promise from the commit enforced by CI rather than by vigilance.
 
 **[CORRECTION] Reject shared YAML — for the right reason.** The first pass justified
 Rust-native by "avoids a `serde_yaml` dep." **`serde_yaml 0.9` is already a direct
@@ -377,6 +392,31 @@ JOIN:** `candidate_ids` (Signal→FindingId), `finding_is_present`, `compute_sco
 `simulate_containment`, and retro re-resolution remain hardcoded Rust bound to the
 live probe baseline and deterministic numeric scoring.
 
+### Seam F — Standardized taxonomy enrichment of the impact layer — **AUGMENT (optional)**
+
+**Goal.** The one place beacon's *rule metadata* genuinely adds to the authored
+why/how (`impact.rs`). beacon rules carry
+`taxonomy: { owasp_llm: LLM06, mitre_atlas: AML.T0024 }`; `impact.rs` carries no
+standardized ids today. Cross-referencing the beacon rule that expresses the same
+pattern lets the dashboard show **OWASP-LLM / MITRE-ATLAS badges** next to the
+hand-authored `(why, how)`.
+
+**Design.** Add an optional `taxonomy: &'static [(&str, &str)]` to the impact entry
+(or a parallel `finding_taxonomy(id)` / `signal_taxonomy(name)` accessor), populated
+by hand from the corresponding beacon rule. Surface it on dashboard finding/signal
+detail. Value-free by construction — these are public standard labels, not secrets.
+
+**MUST:**
+- **F1.** **[CORRECTION] Vendor the taxonomy ids as committed Rust consts** inside
+  `src/dashboard/` (with a `beacon rule <id> as of <commit>` comment). **Do not read
+  them from the live `agent-beacon` submodule** at build/test time — that would
+  couple a Rust release to a Go submodule checkout (see §5, Go/Rust boundary).
+- **F2.** Keep blastradius's authored `(why, how)` authoritative; taxonomy is an
+  *additional badge*, never a replacement for the reachability-framed prose, and the
+  beacon `emit.reason` is **not** imported (it is intent-framed and terser).
+
+Effort: **S** (data entry + a render slot).
+
 ---
 
 ## 5. Hard constraints → wired controls
@@ -399,12 +439,15 @@ Every constraint and the *mechanism* (not aspiration) that upholds it:
 | Stage | Seam(s) | Deliverable | New deps | Effort | Risk |
 |---|---|---|---|---|---|
 | **0** | — | Reconcile SPEC §11/§23/§24 to reflect the built `src/session/`; note `score` command not built, retro is built | none | S | none |
-| **1** | C | `conformance.rs` + per-rule `RuleFixture`s + maturity + `RULE_PACK_VERSION` + build-failing `pack_conformance` (per-fixture `!ok`) | none | M | low |
+| **1** | C | `conformance.rs` + per-rule `RuleFixture`s + maturity + `RULE_PACK_VERSION` + build-failing `pack_conformance` (per-fixture `!ok`) + **impact-coverage gate (C4)** over `impact.rs` | none | M | low |
 | **2** | A | `beacon_view.rs` value-free projection + extended canary + determinism test + emit JSONL (advisory/export only) | none | M | med (value-free) |
 | **3** | B | optional `event_order` ordered correlation (plumbing `None`-default; per-rule enablement later with fixtures) | none | M | low |
 | **4** | D | **explicitly decline** the shell-out; document the passive-file alternative as the only future shape | none | S | n/a |
+| **5** | F | optional taxonomy (OWASP-LLM / MITRE-ATLAS) enrichment of `impact.rs`, vendored consts, dashboard badges | none | S | low |
 
-Recommended order: **0 → 1 → 2 → 3**, with 4 recorded as a deliberate non-goal.
+Recommended order: **0 → 1 → 2 → 3**, with 4 recorded as a deliberate non-goal and
+5 as optional polish. The impact-coverage gate (C4) and Stage 5 both build on the
+`0368556` why/how layer, so they pair naturally once Stage 1 lands.
 Stages are independent enough to land separately; none introduces a dependency.
 
 ---
@@ -448,7 +491,8 @@ Stages are independent enough to land separately; none introduces a dependency.
   `evaluate` ordered walk; `build_catalog` defaults), `src/session/mod.rs`
   (`pub mod conformance; pub const RULE_PACK_VERSION`), `src/session/report.rs`
   (surface version; extend canary loop A4), `src/session/normalize.rs` (consumer of
-  `join_key` for A — read-only).
+  `join_key` for A — read-only), `src/dashboard/impact.rs` (C4 impact-coverage gate;
+  Seam F taxonomy consts — both keyed by the existing `FindingId`/`Signal` identity).
 - **Unchanged (moat):** `src/session/classify.rs`, `src/session/score.rs`,
   `src/session/discovery/*`, `src/session/retro.rs`, `src/session/history.rs`.
 - **Docs/CI:** SPEC §11/§23/§24 reconcile (Stage 0); CI musl-build-without-submodule
