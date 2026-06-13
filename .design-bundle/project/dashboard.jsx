@@ -556,11 +556,15 @@ function RealContainment({ sim }) {
         ))}
       </div>
       <div style={{ marginTop: 16, padding: "12px 14px", borderRadius: 10, border: "1px dashed var(--line-2)", background: "rgba(255,255,255,.02)" }}>
-        <div className="mono" style={{ fontSize: 11, color: "var(--txt-dim)", letterSpacing: 1, marginBottom: 6 }}>IRREDUCIBLE RESIDUAL · {floor}</div>
+        <div className="mono" style={{ fontSize: 11, color: floor > 0 ? "var(--txt-dim)" : "var(--safe)", letterSpacing: 1, marginBottom: 6 }}>
+          {floor > 0 ? "IRREDUCIBLE RESIDUAL · " + floor : "FULLY CONTAINABLE · 0"}
+        </div>
         <div style={{ fontSize: 12.5, color: "var(--txt-mid)", lineHeight: 1.5 }}>
-          {(sim.residual_reasons && sim.residual_reasons.length)
-            ? sim.residual_reasons.join(" · ")
-            : "event-intrinsic risk survives every control — needs human review / server-side enforcement."}
+          {floor > 0
+            ? ((sim.residual_reasons && sim.residual_reasons.length)
+                ? sim.residual_reasons.join(" · ")
+                : "event-intrinsic risk survives every control — needs human review / server-side enforcement.")
+            : "every scored signal in this session is removed by the controls above — the stacked set drops it to zero."}
         </div>
       </div>
     </div>
@@ -625,6 +629,11 @@ function RankedSessions() {
               <div className="mono" style={{ fontSize: 11, color: "var(--txt-mid)", marginTop: 4, whiteSpace: "nowrap" }}>{c.label}</div>
               <div className="mono" style={{ fontSize: 10.5, color: "var(--txt-dim)", marginTop: 2 }}>
                 {(c.toxic_combinations || []).length} toxic · {(c.how || []).length} signals
+              </div>
+              {/* the score caps at 100, so most top sessions tie there; the raw
+                  weight magnitude is the real ranking key — show it to differentiate. */}
+              <div className="mono" style={{ fontSize: 10.5, color: "var(--hot)", marginTop: 2 }}>
+                Σ {c.weight_total != null ? c.weight_total.toLocaleString() : "—"} weight
               </div>
             </button>
           );

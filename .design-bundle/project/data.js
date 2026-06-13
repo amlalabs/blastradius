@@ -467,9 +467,14 @@
     const sess = h.session || {};
     const legs = (h.reachability && h.reachability.legs) || [];
     const required = legs.filter((l) => l.required).map((l) => l.finding_ref);
-    // legs already remediated NOW (required but not currently present) seed deadAtStart.
+    // A leg counts as reachable today only if it fires at >= Notable (matches the
+    // engine's build_verdict). A required leg that is absent OR only Info is
+    // "remediated" — seed those into deadAtStart so the UI's ●/○ indicator agrees
+    // with the hazard status (otherwise an Info leg like ssh.agent_socket shows
+    // "still reachable" on a REMEDIATED-SINCE card).
+    const legReachable = (l) => !!(l.current && l.current.severity && l.current.severity !== "info");
     const deadAtStart = legs
-      .filter((l) => l.required && !l.current)
+      .filter((l) => l.required && !legReachable(l))
       .map((l) => l.finding_ref);
     // per-leg current severity straight from the report (value-free).
     const legSev = {};

@@ -283,8 +283,6 @@ pub const PAGE: &str = r##"<!DOCTYPE html>
           metric: f.metric, detail: f.detail || [],
           // carry the live finding-impact teaching copy + containment onto the node
           why: f.why, how: f.how, remediation: f.remediation || [], class: f.class,
-          // Seam F: standardized taxonomy badge codes (empty when unmapped).
-          owasp: f.owasp || "", atlas: f.atlas || "",
         })),
       }))
     : RINGS;
@@ -621,9 +619,14 @@ pub const PAGE: &str = r##"<!DOCTYPE html>
     const sess = h.session || {};
     const legs = (h.reachability && h.reachability.legs) || [];
     const required = legs.filter((l) => l.required).map((l) => l.finding_ref);
-    // legs already remediated NOW (required but not currently present) seed deadAtStart.
+    // A leg counts as reachable today only if it fires at >= Notable (matches the
+    // engine's build_verdict). A required leg that is absent OR only Info is
+    // "remediated" — seed those into deadAtStart so the UI's ●/○ indicator agrees
+    // with the hazard status (otherwise an Info leg like ssh.agent_socket shows
+    // "still reachable" on a REMEDIATED-SINCE card).
+    const legReachable = (l) => !!(l.current && l.current.severity && l.current.severity !== "info");
     const deadAtStart = legs
-      .filter((l) => l.required && !l.current)
+      .filter((l) => l.required && !legReachable(l))
       .map((l) => l.finding_ref);
     // per-leg current severity straight from the report (value-free).
     const legSev = {};
@@ -1457,12 +1460,6 @@ function FindingDetail({ id, onClose }) {
         </span>
         <span className="mono" style={{ fontSize: 12, color: "var(--txt-mid)", padding: "2px 0" }}>{f.metric}</span>
       </div>
-      {(f.owasp || f.atlas) && (
-        <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
-          {f.owasp && <span className="mono" style={{ fontSize: 10, color: "var(--txt-dim)", border: "1px solid var(--line)", padding: "1px 6px", borderRadius: 4 }}>OWASP {f.owasp}</span>}
-          {f.atlas && <span className="mono" style={{ fontSize: 10, color: "var(--txt-dim)", border: "1px solid var(--line)", padding: "1px 6px", borderRadius: 4 }}>ATLAS {f.atlas}</span>}
-        </div>
-      )}
       {f.why && (
         <div style={{ marginTop: 13 }}>
           <div className="mono" style={{ fontSize: 10, color: "var(--txt-dim)", letterSpacing: 1.5, marginBottom: 4 }}>WHY IT'S RISKY</div>
@@ -1788,11 +1785,15 @@ function RealContainment({ sim }) {
         ))}
       </div>
       <div style={{ marginTop: 16, padding: "12px 14px", borderRadius: 10, border: "1px dashed var(--line-2)", background: "rgba(255,255,255,.02)" }}>
-        <div className="mono" style={{ fontSize: 11, color: "var(--txt-dim)", letterSpacing: 1, marginBottom: 6 }}>IRREDUCIBLE RESIDUAL · {floor}</div>
+        <div className="mono" style={{ fontSize: 11, color: floor > 0 ? "var(--txt-dim)" : "var(--safe)", letterSpacing: 1, marginBottom: 6 }}>
+          {floor > 0 ? "IRREDUCIBLE RESIDUAL · " + floor : "FULLY CONTAINABLE · 0"}
+        </div>
         <div style={{ fontSize: 12.5, color: "var(--txt-mid)", lineHeight: 1.5 }}>
-          {(sim.residual_reasons && sim.residual_reasons.length)
-            ? sim.residual_reasons.join(" · ")
-            : "event-intrinsic risk survives every control — needs human review / server-side enforcement."}
+          {floor > 0
+            ? ((sim.residual_reasons && sim.residual_reasons.length)
+                ? sim.residual_reasons.join(" · ")
+                : "event-intrinsic risk survives every control — needs human review / server-side enforcement.")
+            : "every scored signal in this session is removed by the controls above — the stacked set drops it to zero."}
         </div>
       </div>
     </div>
@@ -1857,6 +1858,11 @@ function RankedSessions() {
               <div className="mono" style={{ fontSize: 11, color: "var(--txt-mid)", marginTop: 4, whiteSpace: "nowrap" }}>{c.label}</div>
               <div className="mono" style={{ fontSize: 10.5, color: "var(--txt-dim)", marginTop: 2 }}>
                 {(c.toxic_combinations || []).length} toxic · {(c.how || []).length} signals
+              </div>
+              {/* the score caps at 100, so most top sessions tie there; the raw
+                  weight magnitude is the real ranking key — show it to differentiate. */}
+              <div className="mono" style={{ fontSize: 10.5, color: "var(--hot)", marginTop: 2 }}>
+                Σ {c.weight_total != null ? c.weight_total.toLocaleString() : "—"} weight
               </div>
             </button>
           );

@@ -499,12 +499,32 @@ fn build_summary(
         }
     };
 
-    let still = verdict.still_reachable_count;
     let total_req = verdict.legs.iter().filter(|l| l.required).count();
+    // Count REQUIRED legs that fire at ≥ Notable today (matches build_verdict's
+    // "present_now"); the numerator must be over the same population as total_req
+    // (the old code used still_reachable_count, which also counts OPTIONAL legs —
+    // producing nonsense like "4 of 1 required leg(s)").
+    let req_still = verdict
+        .legs
+        .iter()
+        .filter(|l| {
+            l.required
+                && l.current
+                    .as_ref()
+                    .map(|c| c.severity.rank() >= Severity::Notable.rank())
+                    .unwrap_or(false)
+        })
+        .count();
+    let extra = verdict.still_reachable_count.saturating_sub(req_still);
 
     let status_clause = match status {
         HazardStatus::StillReachable => {
-            format!("{still} of {total_req} required leg(s) are STILL reachable")
+            let opt = if extra > 0 {
+                format!(" (+{extra} optional leg(s) also reachable)")
+            } else {
+                String::new()
+            };
+            format!("{req_still} of {total_req} required leg(s) STILL reachable{opt}")
         }
         HazardStatus::PartiallyRemediated => {
             "the required legs are present but downgraded since (partially remediated)".to_string()
