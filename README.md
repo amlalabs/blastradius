@@ -203,4 +203,4 @@ cargo run -- compare
 
 ## License
 
-MIT
+MIT © Amla Labs

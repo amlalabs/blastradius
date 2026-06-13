@@ -1,0 +1,251 @@
+name: release
+
+# Cuts a release when a vX.Y.Z tag is pushed to amlalabs/blastradius:
+#   1. validate-tag : strict tag/version checks + shim self-test (one place).
+#   2. build        : cross-build the four targets the npm shim can download.
+#   3. release      : assemble SHA256SUMS, create/update the GitHub Release.
+#   4. publish-npm  : npm publish via OIDC Trusted Publishing (+ provenance).
+#
+# Unlike the kalahari mirror (binary ships INSIDE the npm tarball, so npm is
+# published before the Release), blastradius's npm shim downloads the binary
+# FROM the GitHub Release at runtime — so the Release must exist BEFORE the
+# package goes live. Hence release -> publish-npm ordering.
+#
+# The shim contract (npm/bin/blastradius.js) the Release MUST satisfy:
+#   - asset name:   blastradius-<rust-target>.tar.gz
+#   - archive body: exactly one regular file with basename `blastradius`
+#   - checksums:    a single `SHA256SUMS` file, lines of `<sha256>  <asset>`
+# Verified end-to-end against the shim's own extract/checksum functions.
+
+on:
+  push:
+    tags: ["v[0-9]+.[0-9]+.[0-9]+"]
+  # Manual re-runs (e.g. after fixing the workflow itself) without re-tagging.
+  # Pass `tag` to override github.ref_name. Dispatch AGAINST the tag
+  # (--ref refs/tags/vX.Y.Z) so provenance signs the right ref — enforced below.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to release (e.g. v1.2.3). Required for manual dispatch."
+        required: true
+        type: string
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  validate-tag:
+    name: validate tag
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+      version: ${{ steps.tag.outputs.version }}
+    steps:
+      - name: Resolve tag name
+        id: tag
+        env:
+          DISPATCH_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          # On workflow_dispatch GITHUB_REF_NAME is the workflow's branch, not
+          # the tag the operator typed; prefer the dispatch input when set.
+          TAG="${DISPATCH_TAG:-${GITHUB_REF_NAME}}"
+          if ! printf '%s' "$TAG" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "Tag '$TAG' does not match vX.Y.Z" >&2
+            exit 1
+          fi
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+          echo "Resolved tag=${TAG} version=${TAG#v}"
+
+      - uses: actions/checkout@v5
+        with:
+          # `refs/tags/<tag>` so checkout resolves to the tag refspec even when
+          # a branch of the same name exists.
+          ref: refs/tags/${{ steps.tag.outputs.tag }}
+          fetch-depth: 0
+
+      - name: Assert ref is a tag (not a branch)
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          set -euo pipefail
+          if ! git show-ref --verify --quiet "refs/tags/${TAG}"; then
+            echo "Ref '${TAG}' is not an existing tag (branch, or missing/typo'd tag)" >&2
+            exit 1
+          fi
+          echo "Ref ${TAG} is a tag."
+
+      - name: Assert github.ref matches the dispatched tag
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          DISPATCH_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          # npm provenance signs github.ref directly. A dispatch left on a
+          # branch (no --ref refs/tags/X) would publish a package whose
+          # provenance ref disagrees with the tag. Fail fast.
+          EXPECTED="refs/tags/${DISPATCH_TAG}"
+          if [[ "${GITHUB_REF}" != "$EXPECTED" ]]; then
+            echo "workflow_dispatch must run against the tag. Expected GITHUB_REF=$EXPECTED, got ${GITHUB_REF}." >&2
+            echo "Re-dispatch with --ref refs/tags/${DISPATCH_TAG} (or pick the tag, not the branch, in the UI)." >&2
+            exit 1
+          fi
+          echo "GITHUB_REF matches dispatched tag: ${GITHUB_REF}"
+
+      - name: Assert Cargo.toml + npm/package.json versions match tag
+        env:
+          BARE: ${{ steps.tag.outputs.version }}
+        run: |
+          set -euo pipefail
+          crate="$(grep -m1 '^version' Cargo.toml | sed -E 's/.*"(.*)".*/\1/')"
+          pkg="$(node -p "require('./npm/package.json').version")"
+          echo "tag=$BARE crate=$crate pkg=$pkg"
+          [ "$crate" = "$BARE" ] || { echo "::error::Cargo.toml version $crate != tag $BARE"; exit 1; }
+          [ "$pkg" = "$BARE" ]   || { echo "::error::npm/package.json version $pkg != tag $BARE"; exit 1; }
+
+      - name: Shim self-test
+        run: node npm/test/shim.test.js
+
+  build:
+    name: build (${{ matrix.target }})
+    needs: validate-tag
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { target: x86_64-unknown-linux-musl,  os: ubuntu-latest, cross: true }
+          - { target: aarch64-unknown-linux-musl, os: ubuntu-latest, cross: true }
+          - { target: aarch64-apple-darwin,        os: macos-latest,  cross: false }
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.tag && format('refs/tags/{0}', inputs.tag) || github.ref }}
+
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable @ 2026-05-12
+        with:
+          targets: ${{ matrix.target }}
+
+      # cross gives us a reproducible musl toolchain (ring/rustls build
+      # statically, no host OpenSSL). macOS targets build natively.
+      - name: Install cross
+        if: matrix.cross
+        run: cargo install cross --locked
+
+      - name: Build
+        shell: bash
+        run: |
+          if [ "${{ matrix.cross }}" = "true" ]; then
+            cross build --release --locked --bin blastradius --target ${{ matrix.target }}
+          else
+            cargo build --release --locked --bin blastradius --target ${{ matrix.target }}
+          fi
+
+      - name: Package
+        shell: bash
+        run: |
+          staging="blastradius-${{ matrix.target }}"
+          mkdir -p "dist/$staging"
+          cp "target/${{ matrix.target }}/release/blastradius" "dist/$staging/blastradius"
+          chmod 755 "dist/$staging/blastradius"
+          tar czf "dist/$staging.tar.gz" -C "dist/$staging" blastradius
+          # `shasum -a 256` exists on both ubuntu and macos runners; its
+          # `<hash>  <name>` output is exactly what the shim's checksumFor() parses.
+          ( cd dist && shasum -a 256 "$staging.tar.gz" > "$staging.tar.gz.sha256" )
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.target }}
+          path: |
+            dist/blastradius-${{ matrix.target }}.tar.gz
+            dist/blastradius-${{ matrix.target }}.tar.gz.sha256
+          if-no-files-found: error
+          retention-days: 7
+
+  release:
+    name: create GitHub Release
+    needs: [validate-tag, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Assemble SHA256SUMS
+        shell: bash
+        run: |
+          cd dist
+          cat *.tar.gz.sha256 | sort -k2 > SHA256SUMS
+          rm -f *.tar.gz.sha256
+          echo "=== SHA256SUMS ==="; cat SHA256SUMS
+          echo "=== assets ==="; ls -la
+
+      - name: Create or update GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.validate-tag.outputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Idempotent: existing release -> replace assets; new tag -> create.
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release $TAG exists; uploading assets with --clobber"
+            gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" --clobber \
+              dist/*.tar.gz dist/SHA256SUMS
+          else
+            gh release create "$TAG" dist/*.tar.gz dist/SHA256SUMS \
+              --repo "$GITHUB_REPOSITORY" --title "$TAG" --generate-notes
+          fi
+
+  publish-npm:
+    name: publish to npm
+    needs: [validate-tag, release]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # OIDC: lets the npm CLI exchange the workflow's GitHub
+                      # OIDC token for a short-lived registry token.
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.tag && format('refs/tags/{0}', inputs.tag) || github.ref }}
+
+      - uses: actions/setup-node@v4
+        with:
+          # Node 24 bundles npm 11.x; Trusted Publishing needs npm >= 11.5.1, so
+          # no separate `npm install -g npm@latest` step (the runner's bundled
+          # npm 10 is sporadically missing a transitive dep and dies before it
+          # can self-upgrade — see the kalahari mirror's release.yml).
+          node-version: "24"
+          registry-url: https://registry.npmjs.org
+
+      - name: Stage README + LICENSE into the package
+        run: |
+          cp README.md npm/README.md
+          cp LICENSE npm/LICENSE
+
+      # No NODE_AUTH_TOKEN: authentication is npm Trusted Publishing (OIDC), via
+      # the job-level `id-token: write` above. The publisher binding on
+      # npmjs.com for @amlalabs/blastradius is keyed on
+      #   owner=amlalabs, repo=blastradius, workflow=release.yml.
+      - name: Publish to npm (OIDC + provenance)
+        working-directory: npm
+        run: |
+          set -euo pipefail
+          PKG_NAME=$(node -p "require('./package.json').name")
+          PKG_VERSION=$(node -p "require('./package.json').version")
+          # Registry publishes are immutable; a re-run after a partial failure
+          # would otherwise error on the already-published version. Skip if present.
+          if npm view "${PKG_NAME}@${PKG_VERSION}" version --json >/dev/null 2>&1; then
+            echo "${PKG_NAME}@${PKG_VERSION} already on registry; skipping (idempotent re-run)."
+          else
+            npm publish --access=public --provenance --ignore-scripts
+          fi

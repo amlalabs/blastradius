@@ -2,6 +2,8 @@
   "name": "@amlalabs/blastradius",
   "version": "0.1.0",
   "description": "Local reachability audit for coding-agent environments (run-time binary fetch; no install hooks)",
+  "author": "Amla Labs",
+  "homepage": "https://github.com/amlalabs/blastradius#readme",
   "bin": {
     "blastradius": "bin/blastradius.js"
   },

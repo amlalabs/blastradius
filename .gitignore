@@ -12,6 +12,9 @@
 node_modules/
 npm-debug.log*
 yarn-error.log*
+# Staged into the package by CI at publish time (release.yml); not source.
+npm/README.md
+npm/LICENSE
 
 # Editor / OS cruft
 .DS_Store

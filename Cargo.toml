@@ -3,8 +3,18 @@ name = "blastradius"
 version = "0.1.0"
 edition = "2021"
 description = "Local reachability audit for coding-agent environments"
+authors = ["Amla Labs"]
 license = "MIT"
 repository = "https://github.com/amlalabs/blastradius"
+homepage = "https://github.com/amlalabs/blastradius"
+
+# `cargo binstall blastradius` reuses the same GitHub Release tarballs the npm
+# shim downloads: asset `blastradius-<target>.tar.gz` with the binary at the
+# archive root. No extra CI — same artifacts the release workflow already builds.
+[package.metadata.binstall]
+pkg-url = "{ repo }/releases/download/v{ version }/blastradius-{ target }.tar.gz"
+pkg-fmt = "tgz"
+bin-dir = "{ bin }{ binary-ext }"
 
 [lib]
 name = "blastradius"

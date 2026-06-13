@@ -28,9 +28,11 @@ const MAX_CACHE_CHECKSUM_BYTES = 128;
 function detectTarget() {
   const platform = os.platform();
   const arch = os.arch();
+  // Supported targets must match the release.yml build matrix exactly. x86_64
+  // macOS is intentionally not built; a Rosetta-less Intel Mac falls through to
+  // the clear "unsupported" error below rather than 404-ing on a missing asset.
   if (platform === "darwin") {
     if (arch === "arm64") return "aarch64-apple-darwin";
-    if (arch === "x64") return "x86_64-apple-darwin";
   } else if (platform === "linux") {
     if (arch === "arm64") return "aarch64-unknown-linux-musl";
     if (arch === "x64") return "x86_64-unknown-linux-musl";
