@@ -21,17 +21,10 @@ function Outro() {
 }
 
 function App() {
-  const dashRef = React.useRef(null);
-  const enter = () => {
-    if (dashRef.current) {
-      const top = dashRef.current.getBoundingClientRect().top + window.scrollY;
-      window.scrollTo({ top, behavior: "smooth" });
-    }
-  };
   return (
     <div>
-      <Narrative onEnter={enter} />
-      <div ref={dashRef} style={{ borderTop: "1px solid var(--line)",
+      <Narrative />
+      <div style={{ borderTop: "1px solid var(--line)",
         background: "linear-gradient(180deg, #07090d, #090c12)" }}>
         <Dashboard />
       </div>

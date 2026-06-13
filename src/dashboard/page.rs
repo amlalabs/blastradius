@@ -1115,7 +1115,7 @@ const RING_COPY = [
   { k: "host",      t: "The whole machine",        d: "Docker group to root. Process memory. Browser sessions. Past the repo, past the cloud — the box itself." },
 ];
 
-function RadiusScene({ onEnter }) {
+function RadiusScene() {
   const ref = React.useRef(null);
   const p = useScrollProgress(ref);
   const revealed = p * 6.2;
@@ -1182,9 +1182,9 @@ function RadiusScene({ onEnter }) {
 }
 
 /* ---------- bridge into the dashboard ---------- */
-function Bridge({ onEnter }) {
+function Bridge() {
   return (
-    <section style={{ ...sceneWrap, minHeight: "96vh" }}>
+    <section style={{ ...sceneWrap, minHeight: "80vh" }}>
       <Reveal style={{ textAlign: "center", maxWidth: 900 }}>
         <div className="mono" style={{ color: "var(--txt-dim)", letterSpacing: 2, fontSize: 12, marginBottom: 20 }}>
           THAT NEVER CHANGES BETWEEN SESSIONS
@@ -1193,27 +1193,27 @@ function Bridge({ onEnter }) {
           The real question isn't<br />what it <em style={{ fontStyle: "normal", color: "var(--txt-dim)" }}>can</em> reach.
           <br />It's what it <span style={{ color: "var(--hot)" }}>actually touches.</span>
         </h2>
-        <p style={{ color: "var(--txt-mid)", fontSize: 19, margin: "30px auto 40px", maxWidth: 600, lineHeight: 1.55 }}>
+        <p style={{ color: "var(--txt-mid)", fontSize: 19, margin: "30px auto 8px", maxWidth: 600, lineHeight: 1.55 }}>
           One session reads two files and runs the tests. Another quietly chains a credential,
           an open route, and a deploy file into something far worse. Same machine. Same reach.
           Watch the difference.
         </p>
-        <button className="btn btn-hot" style={{ fontSize: 16, padding: "14px 28px" }} onClick={onEnter}>
-          Open the session blast-radius score →
-        </button>
+        <div className="mono" style={{ color: "var(--txt-dim)", fontSize: 12, letterSpacing: 2, marginTop: 28 }}>
+          ↓ your sessions, ranked
+        </div>
       </Reveal>
     </section>
   );
 }
 
-function Narrative({ onEnter }) {
+function Narrative() {
   return (
     <div>
       <Hook />
       <CalmScene />
       <RevealScene />
       <RadiusScene />
-      <Bridge onEnter={onEnter} />
+      <Bridge />
     </div>
   );
 }
@@ -2220,17 +2220,10 @@ function Outro() {
 }
 
 function App() {
-  const dashRef = React.useRef(null);
-  const enter = () => {
-    if (dashRef.current) {
-      const top = dashRef.current.getBoundingClientRect().top + window.scrollY;
-      window.scrollTo({ top, behavior: "smooth" });
-    }
-  };
   return (
     <div>
-      <Narrative onEnter={enter} />
-      <div ref={dashRef} style={{ borderTop: "1px solid var(--line)",
+      <Narrative />
+      <div style={{ borderTop: "1px solid var(--line)",
         background: "linear-gradient(180deg, #07090d, #090c12)" }}>
         <Dashboard />
       </div>
