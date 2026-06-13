@@ -1,0 +1,2139 @@
+╭─── Claude Code v2.1.177 ─────────────────────────────────────────────────────╮
+│                                                    │ Tips for getting        │
+│                Welcome back Souvik!                │ started                 │
+│                                                    │ Run /init to create a … │
+│                       ▐▛███▜▌                      │ ─────────────────────── │
+│                      ▝▜█████▛▘                     │ What's new              │
+│                        ▘▘ ▝▝                       │ Session titles are now… │
+│ Opus 4.8 · API Usage Billing · Souvik‘s Individual │ Added `footerLinksRege… │
+│ Org                                                │ Improved Bedrock crede… │
+│          ~/Projects/amlalabs/blastradius           │ /release-notes for more │
+╰──────────────────────────────────────────────────────────────────────────────╯
+
+
+❯ Please take a look at https://github.com/Asymptote-Labs/agent-beacon/pull/157 
+  - see how best to integrate this ?                                            
+
+● I'll take a look at that PR. Let me fetch it.
+
+● Fetch(https://github.com/Asymptote-Labs/agent-beacon/pull/157)
+  ⎿  Received 293.9KB (200 OK)
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● gh isn't installed and the PR is in a different org's repo (agent-beacon). Let
+  me dig into the actual PR contents and understand our own project structure
+  in parallel.
+
+● Fetch(https://github.com/Asymptote-Labs/agent-beacon/pull/157/files)
+  ⎿  Received 668.1KB (200 OK)
+
+  Read 1 file (ctrl+o to expand)
+
+● This is highly relevant — the PR is a YAML+CEL threat-rule engine over agent
+  events, and our spec has a not-yet-built §23/§24 session scoring layer that
+  ingests agent traces. Let me read those sections to give a precise integration
+  recommendation.
+
+  Read 1 file, ran 1 shell command (ctrl+o to expand)
+
+● I have enough of the spec. Let me quickly confirm the current source tree
+  state (the spec says src/session/ doesn't exist yet) so my recommendation is
+  grounded in reality.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Confirmed: src/session/ doesn't exist yet, and there's no CEL/YAML rule
+  machinery in the tree — the §23/§24 session layer is still design-only. That
+  actually shapes the answer a lot.
+
+  Here's my read.
+
+  What PR #157 actually is
+
+  It's a standalone threat-detection rule engine for a different product
+  (agent-beacon, in Go):
+
+  - YAML rules with a CEL match expression (e.event.action == "file.read",
+  e.command.command.matches("curl")) evaluated over Beacon Event JSON.
+  - Session correlation — ordered steps + time windows across events.
+  - A maturity ladder (Stable/…) with embedded match/no-match test fixtures +
+  conformance testing as a release gate.
+  - An open spec (SPEC.md + schema.json + VERSION) so the format is portable.
+  - Reference impl pulls in cel-go.
+
+  How it maps onto blastradius §23/§24
+
+  There's real overlap, but also one structural mismatch that decides
+  everything:
+
+  ┌────────────────┬────────────────────┬───────────────────────────────────┐
+  │    Concern     │ agent-beacon #157  │          blastradius §23          │
+  ├────────────────┼────────────────────┼───────────────────────────────────┤
+  │                │                    │ AgentEvent enum (FileRead/Write,  │
+  │ Input          │ "Beacon Event      │ ShellCommand, NetworkAccess,      │
+  │                │ JSON" stream       │ Approval, McpCall) — frozen       │
+  │                │                    │ contract                          │
+  ├────────────────┼────────────────────┼───────────────────────────────────┤
+  │                │ CEL match over     │ ToxicCombinationRule = events ×   │
+  │ Detection unit │ events only        │ real ambient §11–§12 findings     │
+  │                │                    │ (the JOIN — §23.2)                │
+  ├────────────────┼────────────────────┼───────────────────────────────────┤
+  │ Rule storage   │ data-driven YAML + │ hardcoded Rust catalog (6 rules)  │
+  │                │  CEL               │                                   │
+  ├────────────────┼────────────────────┼───────────────────────────────────┤
+  │                │ maturity ladder +  │ canary self-test (§4.4) +         │
+  │ Maturity/tests │ embedded fixtures  │ fixtures (§18)                    │
+  │                │ + conformance      │                                   │
+  ├────────────────┼────────────────────┼───────────────────────────────────┤
+  │ Language       │ Go (cel-go)        │ single Rust binary, deliberately  │
+  │                │                    │ minimal deps                      │
+  └────────────────┴────────────────────┴───────────────────────────────────┘
+
+  The structural mismatch: agent-beacon rules match only the event stream.
+  blastradius's entire thesis (§23.2, "the heart of the product") is that a rule
+  fires only when an observed event joins an ambient reachability finding on
+  this machine. A pure CEL-over-events rule cannot express the finding_triggers 
+  leg — so #157 is not a drop-in replacement for the toxic-combination catalog.
+  It's complementary: it's a great fit for the event-predicate half (the
+  EventPredicate in §23.8), with blastradius's Rust JOIN supplying the finding
+  half on top.
+
+  Three things worth taking, three constraints that bind any of them
+
+  Worth taking:
+  1. The event schema / open spec as an ingestion adapter. §23.3 already lists
+  Codex/Cursor as "adapter stubs, mocked." A beacon-event→AgentEvent adapter is
+  the cleanest, lowest-risk integration: blastradius consumes beacon traces as
+  one more agent source. No engine changes.
+  2. Data-driven YAML rules — this is genuinely on-brand. blastradius already
+  went spec-driven for the credential stores (StoreSpec/registry.rs — "add a
+  store = add a data entry"). Moving the hardcoded toxic-combo catalog to YAML
+  rules fits that DNA, and the open spec gives cross-tool interop.
+  3. The maturity ladder + embedded fixtures + conformance gate — a strong
+  discipline that maps cleanly onto §4.4/§18.
+
+  Constraints that bind (deal-breakers if ignored):
+  1. Value-free / Layer-1 redaction (§4.2/§4.3, the hard line in your memory).
+  CEL like e.command.command.matches("curl") runs over raw values. In
+  blastradius that matching can only happen inside the normalize.rs Layer-1
+  boundary, with only the pattern category (never the substring) surviving.
+  Beacon events almost certainly carry raw command/host text — any adapter must
+  strip them at ingest, same as FileWrite.diff/McpCall.input are dropped today.
+  2. Determinism + no heavy deps for MVP. Adding a Rust CEL interpreter
+  (cel-interpreter) is a real dependency and a new eval surface. Justifiable for
+  a data-driven rule layer; overkill if you only want trace ingestion.
+  3. The JOIN must remain. Whatever rule format you adopt has to keep "no
+  observed action, no path" and "must join a real ambient finding" (§23.8
+  activation gate) — CEL-over-events alone loses that.
+
+  My recommendation
+
+  Given the session layer is still unbuilt, the highest-leverage move is the
+  narrow one now, optional depth later:
+
+  - Now (low risk, high value): treat #157's event schema as a trace-source 
+  adapter — beacon → AgentEvent — behind the §23.3 adapter seam, with Layer-1
+  redaction enforced at the boundary. Borrow the embedded-fixture/conformance
+  discipline for your trace fixtures. This costs no new deps and no engine
+  rework.
+  - Later (when you build the toxic-combo engine): adopt the YAML rule format 
+  for the EventPredicate layer only, keeping the Rust JOIN against ambient
+  findings as the second leg. Reuse schema.json/VERSION for interop. This is
+  where a Rust CEL crate would earn its place.
+
+  I'd not try to replace the toxic-combination catalog wholesale with beacon's
+  CEL rules — you'd lose the JOIN, which is the product.
+
+  To point me at the right depth:
+
+● User answered Claude's questions:
+  ⎿  · What's the integration goal you actually want here? → I want an analysis.
+     I want to integrate this into blastradius somehow. Think of natural 
+     integration points. Can I replace anything in the repo with this? Think of 
+     agent-beacon as a more mature, battle hardened codebase.
+     · Should I start by writing this up into the spec, or produce working code?
+     → Decide later
+
+● Good reframe. Let me answer the question you actually asked: treating 
+  agent-beacon as the mature base, what in blastradius can be replaced by it — 
+  and what can't.
+
+  First, the dividing line that decides every "replace?"
+
+  blastradius is two products in one tree:
+
+  - The shipped asset — a static ambient-reachability scanner (probes → findings
+  → redacted reports). This is "what can code running as me reach?"
+  - The unbuilt §23/§24 session layer — a runtime overlay that scores what an
+  agent session actually did.
+
+  agent-beacon #157 is a runtime event-detection engine. It has zero overlap 
+  with the static scanner — there is nothing in src/probes, src/report,
+  src/compare, or the dashboard's reachable-surface denominator that beacon can
+  replace. If anyone proposes pointing beacon at the static scanner, that's a
+  category error. So the entire replace question lives inside the not-yet-built 
+  session layer, which is the cheapest possible place to make this decision —
+  nothing to rip out, just design not-yet-committed.
+
+  What you can actually replace (all in §23/§24)
+
+  §23/§24 component: trace.rs event schema + Codex/Cursor adapter stubs
+  Replace with beacon?: Replace
+  Why: Capturing agent actions across harnesses is the unglamorous, bug-prone
+    work beacon is battle-hardened at. Don't invent your own AgentEvent +
+    per-agent adapters — consume Beacon Event JSON.
+  ────────────────────────────────────────
+  §23/§24 component: §24 AUTO-SLURP (discover + parse transcripts)
+  Replace with beacon?: Replace
+  Why: Same reasoning — if beacon already captures sessions, the
+    transcript-discovery registry (§24.1) and parsers (§24.2) are work you'd
+    rather not own. Let beacon be the sensor.
+  ────────────────────────────────────────
+  §23/§24 component: toxic_combinations.rs — the EventPredicate half
+  Replace with beacon?: Replace
+  Why: The "did the session do X?" leg is exactly what beacon's YAML+CEL rules
+    express well. Adopt the format for that leg.
+  ────────────────────────────────────────
+  §23/§24 component: Rule testing discipline (your §4.4/§18 is lighter)
+  Replace with beacon?: Adopt/upgrade
+  Why: Beacon's maturity ladder + embedded match/no-match fixtures + conformance
+
+    release gate is more mature than the canary self-test alone.
+
+  What you cannot replace — this is the moat
+
+  Component: classify.rs — THE JOIN (events × real §11–§12 ambient findings)
+  Why beacon can't do it: Beacon matches the event stream only. It has no
+  concept
+     of "this event joins a reachable AWS-creds finding on  this machine." This
+    is §23.2, "the heart of the product."
+  ────────────────────────────────────────
+  Component: The ambient-finding baseline (the denominator)
+  Why beacon can't do it: Beacon has no static reachability map. This is the
+    entire rest of blastradius.
+  ────────────────────────────────────────
+  Component: score.rs — blast-radius score + containment simulator
+  Why beacon can't do it: Beacon emits match/no-match verdicts, not a 0–100
+  score
+    grounded in ambient findings that recomputes under control toggles (§23.10).
+  ────────────────────────────────────────
+  Component: normalize.rs — Layer-1 value-free redaction
+  Why beacon can't do it: Beacon's CEL deliberately matches on raw values
+    (e.command.command.matches("curl")), so it retains raw command/host text.
+    Your value-free promise (your memory's load-bearing discipline) cannot be
+    outsourced to it.
+  ────────────────────────────────────────
+  Component: SessionReport frozen output contract
+  Why beacon can't do it: Beacon's verdict output is far thinner than reasons[]
+    with finding_ref drill-down.
+
+  The real architecture this implies (the honest answer)
+
+  Don't think "merge two rule engines." Think division of labor along the 
+  numerator/denominator seam blastradius already drew:
+
+  ▎ beacon = the sensor + raw threat rules (the numerator's signal). blastradius
+  ▎ = the static ambient reachability map (the denominator) + the JOIN that 
+  ▎ turns a beacon match into a blast-radius path on this machine.
+
+  beacon answers "did a risky action happen?" blastradius answers "…and does
+  that action compose with what this machine can actually reach?" That's
+  production_deployment_path = beacon-detected deploy edit × blastradius's real
+  git.push_likelihood finding. Neither tool can produce that line alone.
+
+  Two constraints that shape how you adopt, not whether
+
+  1. Go vs. single Rust binary. beacon is Go + cel-go; blastradius is
+  deliberately one static Rust binary (§8) for the distribution and supply-chain
+  story (§16 — the npm shim refuses to even fetch-on-install). So for the rule 
+  format and event schema, you adopt the spec (schema.json/VERSION/CEL grammar)
+  and reimplement in Rust — not the Go code. The one place running beacon as
+  code makes sense is as a separate upstream process emitting JSON that
+  blastradius reads — a clean process boundary that respects both codebases and
+  keeps blastradius a single binary.
+  2. Redaction is non-negotiable at the boundary. Any beacon event entering
+  blastradius must pass through normalize.rs Layer-1 before anything is scored
+  or rendered — raw command/host/diff stripped to category + length, exactly as
+  FileWrite.diff is dropped today. beacon being "more mature" does not mean
+  "trustworthy to emit into a blastradius report"; its maturity is in detection,
+  not in your value-free contract.
+
+  Bottom line
+
+  - Replace nothing in the shipped product. Beacon doesn't touch static
+  reachability.
+  - In the session layer, replace your capture + event-schema + transcript-slurp
+  ambitions with "consume beacon as the sensor," and adopt its YAML+CEL format 
+  for the event-predicate leg + its conformance-test discipline.
+  - Keep bespoke the JOIN, the ambient baseline, the score/containment sim, and 
+  the redaction boundary — that's the part of blastradius that has no beacon
+  equivalent and is the reason the product exists.
+
+  The single highest-leverage takeaway: this lets you delete §23.3's 
+  adapter-stub plan and most of §24 (the hardest, least-differentiated code you
+  were going to write) and reframe blastradius's session layer as the JOIN on 
+  top of beacon events — which is both less code and a cleaner story.
+
+  Want me to write this up as a §23/§24 spec revision (it'd meaningfully
+  simplify those sections), or sketch the beacon→AgentEvent-equivalent boundary
+  + redaction adapter as a concrete prototype?
+
+✻ Cogitated for 1m 17s
+
+❯ can i link the go code into the Rust ?                                        
+
+● Technically yes. For this project, you almost certainly shouldn't. Here's the
+  honest breakdown.
+
+  How it would work
+
+  Go can't be linked as a normal library — it brings its entire runtime (GC,
+  goroutine scheduler, signal handlers). The mechanism is cgo:
+
+  - go build -buildmode=c-archive → a .a + C header exposing functions you mark
+  //export.
+  - Rust links that archive via FFI and calls in.
+  - You'd marshal JSON strings across a C ABI: Rust serializes an event → *const
+  c_char → Go unmarshals, runs the CEL rule, returns a verdict string/code →
+  Rust copies it out and frees per cgo's pointer rules.
+
+  So the seam is: a thin C-ABI evaluate(rule, event_json) -> verdict_json shim
+  over cel-go.
+
+  Why it's the wrong trade here — four specific costs
+
+  1. It wrecks your distribution story (the decisive one). §16 ships four static
+  targets including x86_64-unknown-linux-musl and aarch64-unknown-linux-musl.
+  cgo + cross-compilation + musl static linking is famously fragile — each
+  target needs a matching C cross-toolchain and a Go cross-build with
+  CGO_ENABLED=1. Your clean cargo build --target … matrix becomes a four-cell
+  Go+C cross-compile gauntlet. This alone usually kills the idea.
+  2. You embed a second language runtime into "a minimal single Rust binary."
+  The Go GC and scheduler now live in your process and binary. §8 chose
+  single-Rust-binary deliberately.
+  3. It contradicts your own brand. blastradius is a tool that shames 
+  supply-chain footguns (§16 — the npm shim refuses to fetch-on-install). Adding
+  a Go toolchain to your build/CI and a Go runtime to your artifact is exactly
+  the kind of thing someone in your demo room will point at.
+  4. Signal-handler and safety friction. Go's runtime installs its own signal
+  handlers (SIGSEGV/SIGPROF/…), which fight with your ctrlc handler and
+  subprocess handling. And it doesn't help the thing you'd hope — CEL still 
+  evaluates over raw values, so you're now marshaling raw command/host strings
+  across a language boundary into a runtime you don't control, before your
+  normalize.rs Layer-1 redaction. Linking makes the value-free boundary murkier,
+  not cleaner.
+
+  The only thing you genuinely gain is cel-go's exact, battle-hardened CEL
+  semantics versus a less-mature Rust CEL crate. That's a real but narrow win,
+  and not worth the four costs above.
+
+  Better ways to get the same value, in order
+
+  1. Separate process (recommended). Run beacon as the Go sidecar/sensor; it
+  evaluates rules and emits JSON; blastradius reads it. Clean ABI (JSON over a
+  pipe/socket), independent toolchains, single Rust binary preserved, redaction
+  at the read boundary. This is the numerator/denominator division of labor from
+  before — and it's less coupling than linking, not more.
+  2. WASM, if you want it in-process. Compile the Go threat-rules engine to
+  WebAssembly and run it via wasmtime embedded in your Rust binary. This is
+  actually the most on-brand link option: it keeps a single Rust binary,
+  collapses the cross-compile matrix to one target (wasm), and sandboxes the 
+  rule evaluator so it provably can't touch fs/network — which aligns with your
+  safety story. Caveats: standard Go→wasm carries runtime weight; TinyGo is
+  lighter but may not support all of cel-go's reflection. Worth a spike before
+  committing.
+  3. Reimplement the CEL-over-events leg in Rust using a CEL crate
+  (cel-interpreter), adopting beacon's spec (schema.json/VERSION/rule YAML)
+  rather than its code. No Go at all; you keep interop via the shared format.
+  Cost: the Rust CEL ecosystem is less hardened than cel-go.
+
+  Bottom line
+
+  Don't cgo-link it. The musl/darwin static-binary story and your supply-chain
+  brand are worth more than cel-go's exact semantics. If you want beacon's
+  maturity, run it as a process (cleanest) or as WASM (in-process + sandboxed,
+  and the only "linking" form that fits your safety/distribution constraints).
+  Reserve a from-scratch Rust CEL impl for when you only care about the format,
+  not the engine.
+
+  Want me to spike one of these — e.g. sketch the JSON process boundary, or test
+  whether the cel-go threat-rules engine compiles to WASM cleanly?
+
+✻ Cooked for 19s
+
+❯ Also check this: https://github.com/Asymptote-Labs/agent-beacon/pull/158      
+                                                                                
+  See if i can shell out to agent-beacon or something at runtime to pull        
+  insights                                                                      
+
+● Fetch(https://github.com/Asymptote-Labs/agent-beacon/pull/158)
+  ⎿  Received 322.3KB (200 OK)
+
+● Now it's viable — that's exactly what #158 adds. Previously I recommended a
+  process boundary as a hypothetical; #158 makes it a real, supported interface.
+
+  What #158 gives you to shell out to
+
+  - beacon scan --json — loads the active rules, evaluates them against runtime
+  JSONL telemetry, streams Findings (rule matches with severity + correlation
+  evidence) as JSON. Flags: --min-severity, --session, --fail-on.
+  - beacon rules … — corpus management (list/add/remove/pull/lint/fields),
+  reads/writes ~/.beacon/endpoint/rules.
+
+  beacon scan --json --session <id> is precisely the clean ABI I said to prefer
+  over cgo-linking: JSON over a pipe, independent toolchains, your single Rust
+  binary intact.
+
+  The division of labor it enables
+
+  beacon scan already does the detection (the numerator's raw signal). So
+  blastradius consumes beacon's Findings and adds the one thing beacon can't:
+  the JOIN to ambient reachability (the denominator). beacon says "credential
+  read followed by outbound"; blastradius asks "does egress.connectivity +
+  aws.credentials.profiles actually exist on this machine?" → emits
+  exfiltration_path. This lets you delete §23.3's adapter stubs and consume
+  beacon scan --json instead.
+
+  The precondition that resizes the "replace §24" claim
+
+  Read the summary carefully: beacon scan evaluates beacon's own runtime JSONL 
+  telemetry. That means it presumes beacon is already running as the collector
+  on the machine. So:
+
+  - This is not "blastradius spawns beacon to analyze a Claude Code transcript."
+  It's "blastradius consumes telemetry beacon already captured."
+  - Verify before relying on it: can beacon ingest the sources §24 cares about
+  (~/.claude/projects/*.jsonl, Codex, Cursor)? If beacon only reads its own
+  format, shelling out does not replace §24's transcript parsing — you'd still
+  need to convert transcripts into beacon's format first, or keep §24. My
+  last-turn "delete most of §24" claim holds only if beacon can ingest your
+  transcript sources. This is the single thing to check first.
+
+  Four non-negotiable conditions (your own brand sets these)
+
+  1. Hardened subprocess resolution — this one is on-brand-critical. blastradius
+  shells out only to git today, and it specifically defends against a
+  repo-local fake git on PATH (§9). A bare beacon lookup is the exact
+  confused-deputy attack your tool exists to surface. Resolve beacon via
+  absolute path / the same hardened lookup as git — never beacon off $PATH.
+  2. Redact beacon's output at the boundary. beacon's CEL matches on raw values
+  (command.command), so its Findings can carry raw commands/hosts/matched
+  substrings. Your contract is value-free. Every beacon Finding must pass
+  through normalize.rs Layer-1 redaction before it reaches a SessionReport, the
+  dashboard, or JSON — and must survive the §4.4 canary self-test (plant a
+  synthetic secret in beacon's JSONL, assert it doesn't leak through your
+  renderers).
+  3. Offline + disclosed. beacon rules pull does optional HTTP fetches.
+  blastradius's promise is "no phone-home; one documented egress probe." So:
+  invoke beacon scan only (never pull), with any offline flag beacon offers, and
+  document the subprocess in --help the way §4.6 documents the egress probe.
+  I'd gate the whole thing behind an explicit flag (score --beacon /
+  --trace-source beacon) so it's never a silent network/subprocess surprise.
+  4. Pin for determinism. §23 promises a deterministic engine, but beacon's
+  score now depends on whichever rules sit in the user's mutable
+  ~/.beacon/endpoint/rules. Record beacon's version + rule-pack VERSION in the
+  SessionReport so a score is reproducible and honest. (Relevant: bugbot flagged
+  that rules with failing embedded tests can still install — so the corpus
+  isn't guaranteed conformance-clean; pinning a known-good pack matters.)
+
+  Bottom line
+
+  Yes — shell out to beacon scan --json as the trace/detection source; keep the
+  JOIN, the ambient baseline, scoring, and redaction in blastradius. It's the
+  cleanest integration available and avoids every cgo/musl/runtime cost from the
+  last turn. Just treat beacon as an optional, explicitly-invoked, hardened, 
+  redacted-at-boundary subprocess — and first confirm beacon can ingest the 
+  telemetry sources you care about, since that's what decides whether it also
+  replaces §24 or just §23.3.
+
+  Want me to (a) verify what input formats beacon scan actually accepts (I can
+  dig into the #158 files), or (b) sketch the Rust subprocess adapter — hardened
+  beacon resolution → scan --json → parse Findings → Layer-1 redact → JOIN?
+
+✻ Cooked for 32s
+
+❯ Take a look at what is ALREADY in the repo. do a deep review/audit/etc. come  
+  up with a plan to integrate the agent beacon CEL json stuff                   
+● This is a real audit + plan task. Let me ground myself in what's actually
+  shipped (the spec has aspirational/post-MVP content, so I need code
+  ground-truth), then design the integration. I'll read the core contract files
+  directly and fan out an Explore agent for the probe/FindingId inventory in
+  parallel.
+
+  Read 2 files, ran 1 shell command (ctrl+o to expand)
+
+● Explore(Inventory probe FindingIds)
+  ⎿  Done (30 tool uses · 81.8k tokens · 1m 48s)
+  (ctrl+o to expand)
+
+● Major discovery: the spec says src/session/ is "design-only, not built" — but
+  it's actually largely implemented. There's a full session layer: trace.rs,
+  normalize.rs, classify.rs (the JOIN), toxic_combinations.rs (the rule
+  catalog), score.rs, report.rs, plus discovery/ with Claude + Codex JSONL
+  transcript parsers (§24 AUTO-SLURP). The SPEC is stale. This completely
+  reframes the task: integrating beacon is about slotting into an existing
+  engine, not greenfield.
+
+  Let me read the integration-critical files directly and fan out a second
+  Explore for the ingestion/score subsystems.
+
+  Read 4 files (ctrl+o to expand)
+
+● Explore(Map session ingestion and scoring)
+  ⎿  Done (22 tool uses · 98.9k tokens · 2m 2s)
+  (ctrl+o to expand)
+
+● I now have full ground truth. The headline finding reframes everything: the 
+  session layer is already built — the spec just hasn't caught up. Here's the
+  audit and a concrete, code-grounded integration plan.
+
+  Audit: what's actually in the repo
+
+  src/session/ is a complete, tested pipeline (not "design only" as SPEC
+  §11/§23/§24 claim — that's stale, and SPEC.md is already dirty in git status):
+
+  discover_sessions()                 # discovery/ — slurps 14 agents'
+  transcripts → AgentEvent
+    → normalize()                     # normalize.rs — Layer-1 redaction;
+  AgentEvent → Signal
+      → classify()                    # classify.rs — THE JOIN: Signal ×
+  baseline Finding
+        → toxic_combinations::evaluate()  # 6 hardcoded rules: event_triggers ×
+  finding_triggers
+          → score_session() / simulate_containment()  # score.rs —
+  weights/multipliers/sim
+            → build_session_report()  # report.rs — SessionReport (+
+  retro.rs/history.rs)
+
+  Wired into sessions, audit-history, and dashboard (lib.rs). The score command
+  from SPEC §23.12 was not built; retro-hazard (§24) was.
+
+  The critical thing reading the code reveals: blastradius already has a rule 
+  engine — it's just hardcoded in Rust. The exact things beacon's CEL expresses
+  declaratively exist here as hand-written predicates:
+
+  ┌──────────────────────────────────────┬──────────────────────────────────┐
+  │           beacon CEL match           │ blastradius hardcoded equivalent │
+  ├──────────────────────────────────────┼──────────────────────────────────┤
+  │ e.event.action=="file.read" &&       │ is_secret_store_path() —         │
+  │ is_secret_store(e.path)              │ normalize.rs:132                 │
+  ├──────────────────────────────────────┼──────────────────────────────────┤
+  │ e.command.command.matches("docker    │ is_container_runtime_shape() —   │
+  │ (run|exec)")                         │ toxic_combinations.rs:261        │
+  ├──────────────────────────────────────┼──────────────────────────────────┤
+  │ deploy-path match                    │ is_deploy_path() —               │
+  │                                      │ normalize.rs:188                 │
+  ├──────────────────────────────────────┼──────────────────────────────────┤
+  │ git-write match                      │ is_git_write_shape() —           │
+  │                                      │ toxic_combinations.rs:250        │
+  ├──────────────────────────────────────┼──────────────────────────────────┤
+  │ the 6 correlation rules              │ build_catalog() —                │
+  │                                      │ toxic_combinations.rs:67         │
+  └──────────────────────────────────────┴──────────────────────────────────┘
+
+  Where beacon fits — and a correction to what I told you earlier
+
+  Reading the code overturns my prior advice. Do not shell out to beacon scan 
+  for ingestion, and do not expect it to replace §24. blastradius's discovery/
+  already parses 14 agents' native transcripts directly; beacon scan reads
+  beacon's own runtime JSONL (presumes beacon-as-collector). For transcript
+  ingestion, blastradius is the more mature side here. So:
+
+  Replaceable seams (real "replace" candidates):
+  - The hardcoded event-classification predicates (normalize.rs is_* +
+  toxic_combinations event_trigger_matched/is_*_shape) → beacon's YAML+CEL match
+  expressions. This is the genuine swap: code → data.
+  - The unordered event-trigger gate (current: "every trigger matched
+  somewhere") → beacon's session correlation (ordered steps + time windows),
+  which is strictly more expressive. Pairs naturally with retro.rs's existing
+  LegOrdering.
+  - The ad-hoc #[cfg(test)] rule tests → beacon's embedded match/no-match 
+  fixtures + conformance gate + maturity ladder.
+
+  Not replaceable (the moat — confirmed in code):
+  - classify.rs THE JOIN against real Findings — no beacon analog.
+  - score.rs weights/multipliers/containment simulator — blastradius-specific.
+  - discovery/ — more mature than beacon for transcripts.
+  - retro.rs/history.rs — unique.
+  - Value-free redaction (normalize Layer-1, report Layer-2 sweep, canary).
+
+  The integration plan
+
+  Stage 0 — reconcile spec/code drift (do first, ~30 min). SPEC.md still says
+  §23/§24 are unbuilt. Fix that before anyone plans on top of a false map.
+  Cheap, prevents compounding confusion.
+
+  Stage 1 — adopt beacon's rule discipline (low risk, no new deps, high value).
+  Restructure the existing 6-rule catalog + signal taxonomy to carry per-rule 
+  embedded match/no-match fixtures, add a conformance test that fails the build
+  if any rule's fixtures don't pass, and a maturity field (stable/experimental).
+  Borrow beacon's schema.json/VERSION concept for the rule shape. This hardens
+  what you have using beacon's best idea, costs nothing in dependencies, and is
+  squarely on-brand (you already did spec-driven for credential stores —
+  store.rs/registry.rs).
+
+  Stage 2 — make event-classification data-driven via beacon CEL (the real CEL 
+  integration; the fork). Move the is_* predicates and event_trigger_matched
+  tags into beacon-format YAML rules, evaluated by a Rust CEL crate inside the 
+  normalize.rs Layer-1 boundary so only the value-free Signal escapes (CEL sees
+  raw command/path, emits a category, raw is discarded — exactly how the
+  predicates work today). Two concrete sub-tasks:
+  - A BeaconEvent ⇄ AgentEvent schema shim — your AgentEvent is coarser than
+  Beacon Event JSON (no e.event.action/e.command substructure), so CEL needs a
+  view over it.
+  - Keep finding_triggers + scoring in Rust; beacon CEL only supplies the event 
+  leg. This preserves the JOIN, which beacon can't express.
+  - Cost: a CEL dependency (cel-interpreter) and a new eval surface in a
+  deliberately-minimal binary. This is the decision below.
+
+  Stage 3 — correlation upgrade (optional, within Stage 2). Replace the
+  unordered gate with beacon's ordered/time-windowed correlation. Folds cleanly
+  into retro.rs's LegOrdering and exit_in_session.
+
+  Stage 4 — beacon scan --json as a live detection source (optional, separate, 
+  additive). Only if beacon-as-collector enters the picture (e.g. a PreToolUse
+  hook). Hardened subprocess resolution (same defense as the git lookup),
+  Layer-1 redaction at the boundary, offline-only, canary-covered. Additive to 
+  discovery/, not a replacement.
+
+  Hard constraints any stage must honor
+
+  - CEL evaluation must live inside the Layer-1 boundary; only Signal/category
+  escapes — never raw command/host/diff.
+  - Determinism: rule corpus must be pinned/versioned (beacon's VERSION), since
+  a mutable rule set changes scores.
+  - Dep minimalism is load-bearing for your supply-chain brand — a CEL crate is
+  the one real cost to weigh.
+  - The §4.4 canary self-test must be extended to cover any new rule-eval path.
+
+  The one genuine fork is Stage 2's CEL dependency — it determines whether this
+  is a discipline upgrade or a real engine change:
+
+● User declined to answer questions
+  ⎿  · How deep do you want to go on the beacon integration? (Stage 0+1 only (no
+     new deps) / Through Stage 2 (CEL dep) / Full (Stages 2–4) / Just the plan 
+     for now)
+     · Want me to write this up, or start building? (Write a design doc / plan 
+     file / Start implementing the chosen depth / Just reply here)
+
+❯ Just the plan for now                                                         
+
+● Got it — plan only, nothing written. It's all laid out above. Quick recap of
+  the actionable shape so it's in one place:
+
+  - Key finding: the session engine (src/session/) is already built and wired
+  into sessions/audit-history/dashboard; SPEC.md is stale on that. blastradius
+  already has a rule engine — hardcoded Rust predicates that are 1:1 with what
+  beacon's CEL expresses declaratively.
+  - Replace candidates: the hardcoded event-classification (normalize.rs is_*,
+  toxic_combinations event_trigger_matched) → beacon YAML+CEL; the unordered
+  trigger gate → beacon correlation; ad-hoc rule tests → beacon's
+  embedded-fixtures + conformance gate.
+  - The moat (don't touch): the JOIN (classify.rs), scoring/containment
+  (score.rs), transcript ingestion (discovery/ — already more mature than beacon
+  scan for this), retro/history, and the value-free redaction layers.
+  - Correction to my earlier advice: shelling out to beacon scan for ingestion
+  is redundant here; it's only worth it as an additive live detection source
+  (Stage 4), not a replacement for §24.
+  - Staged path: 0) fix spec drift → 1) adopt beacon's rule discipline (no new
+  deps) → 2) CEL-drive the event layer inside Layer-1 (the real fork: a Rust CEL
+  dependency) → 3) correlation upgrade → 4) optional live beacon scan source.
+
+  Whenever you want to move, just tell me the depth and I'll start.
+
+✻ Churned for 4s
+
+❯ All stages, write a comprehensive design doc. Use a workflow to ground        
+  yourself. I added agent-beacon as submodule. Check it out.                    
+
+● The user explicitly asked for a workflow — that's the opt-in. Let me first
+  scout the submodule so the workflow targets real paths, then run a grounding
+  workflow and write the design doc.
+
+  Ran 3 shell commands (ctrl+o to expand)
+
+● The submodule is at ./agent-beacon (v0.0.60). The rule format is now concrete
+  — YAML with correlation (session-scoped, ordered steps, window: 120s), CEL
+  match over e.event.action/e.file.path/e.command.command/e.session.id,
+  status/posture/taxonomy, and embedded tests with match/no_match verdicts.
+
+  I have deep blastradius knowledge from the earlier audit. Now I'll run a
+  grounding workflow that deep-reads the beacon side, cross-walks each
+  integration seam, and adversarially checks against blastradius's hard
+  constraints — then I'll synthesize the design doc.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Now I'll author and launch the grounding workflow.
+
+● Workflow(Ground the agent-beacon <-> blastradius threat-rules/CEL integration:
+          deep-read beacon, cross-walk each seam to the existing Rust session
+          engine, adversarially check against blastradius safety/distribution
+          constraints)
+  ⎿  /workflows to view dynamic workflow runs
+
+● Dynamic workflow "Ground the agent-beacon &lt;-&gt; blastradius threat-rules/CEL integration: deep-read beacon, cross-walk each seam to the existing Rust session engine, adversarially check against blastradius safety/distribution constraints" failed: Error: GROUND is not defined
+    at &lt;anonymous&gt; (workflow.js:66:95)
+    at &lt;anonymous&gt; (file:///:1:21)
+    at &lt;anonymous&gt; (/$bunfs/root/src/entrypoints/cli.js:3705:6376)
+    at map (native)
+    at &lt;anonymous&gt; (/$bunfs/root/src/entrypoints/cli.js:3705:6366) · 0s
+
+● Schema constants weren't defined. Let me add them and re-run.
+
+● Update(~/.claude/projects/-home-souvik-Projects-amlalabs-blastradius/fd73ed21-
+        fe25-4f5f-862e-0f56445c6b6e/workflows/scripts/beacon-blastradius-integra
+        tion-grounding-wf_53aa7abf-7bb.js)
+  ⎿  File must be read first
+
+  Read 1 file (ctrl+o to expand)
+
+● Update(~/.claude/projects/-home-souvik-Projects-amlalabs-blastradius/fd73ed21-
+        fe25-4f5f-862e-0f56445c6b6e/workflows/scripts/beacon-blastradius-integra
+        tion-grounding-wf_53aa7abf-7bb.js)
+  ⎿  Added 50 lines
+      11  const BR = '/home/souvik/Projects/amlalabs/blastradius'
+      12  const BE = BR + '/agent-beacon'
+      13  
+      14 +const GROUND = {                                               
+      15 +  type: 'object',                                              
+      16 +  properties: {                                                
+      17 +    component: { type: 'string' },                             
+      18 +    summary: { type: 'string' },                               
+      19 +    keyFacts: { type: 'array', items: { type: 'string' } },    
+      20 +    keyTypesOrSignatures: { type: 'array', items: { type: 'stri
+         +ng' } },                                                       
+      21 +    fileRefs: { type: 'array', items: { type: 'string' } },    
+      22 +    gotchas: { type: 'array', items: { type: 'string' } },     
+      23 +  },                                                           
+      24 +  required: ['component', 'summary', 'keyFacts', 'fileRefs'],  
+      25 +}                                                              
+      26 +                                                               
+      27 +const DECISION = {                                             
+      28 +  type: 'object',                                              
+      29 +  properties: {                                                
+      30 +    seam: { type: 'string' },                                  
+      31 +    verdict: { type: 'string', enum: ['replace', 'augment', 'ke
+         +ep-bespoke', 'additive-new', 'drop'] },                        
+      32 +    mechanism: { type: 'string' },                             
+      33 +    blastradiusTouchpoints: { type: 'array', items: { type: 'st
+         +ring' } },                                                     
+      34 +    beaconArtifacts: { type: 'array', items: { type: 'string' }
+         + },                                                            
+      35 +    risks: { type: 'array', items: { type: 'string' } },       
+      36 +    constraintCheck: { type: 'string' },                       
+      37 +    effort: { type: 'string', enum: ['S', 'M', 'L', 'XL'] },   
+      38 +  },                                                           
+      39 +  required: ['seam', 'verdict', 'mechanism', 'risks'],         
+      40 +}                                                              
+      41 +                                                               
+      42 +const RISK = {                                                 
+      43 +  type: 'object',                                              
+      44 +  properties: {                                                
+      45 +    constraint: { type: 'string' },                            
+      46 +    violationsFound: {                                         
+      47 +      type: 'array',                                           
+      48 +      items: {                                                 
+      49 +        type: 'object',                                        
+      50 +        properties: {                                          
+      51 +          where: { type: 'string' },                           
+      52 +          issue: { type: 'string' },                           
+      53 +          severity: { type: 'string' },                        
+      54 +          fix: { type: 'string' },                             
+      55 +        },                                                     
+      56 +        required: ['where', 'issue'],                          
+      57 +      },                                                       
+      58 +    },                                                         
+      59 +    verdict: { type: 'string' },                               
+      60 +  },                                                           
+      61 +  required: ['constraint', 'verdict'],                         
+      62 +}                                                              
+      63 +                                                               
+      64  // Ground-truth digest of the EXISTING blastradius session engi
+          ne (already audited).
+      65  // Cross-walk/adversarial agents use this so they don't re-deri
+          ve it.
+      66  const BR_CONTEXT = `
+
+● Schemas added. Re-running from the fixed script.  ⎿  /workflows to view dynamic workflow runs
+
+● The grounding workflow is running in the background (3 phases, 13 agents).
+  I'll write the comprehensive design doc once it completes and I've synthesized
+  the grounded facts, cross-walk decisions, and adversarial risk findings. No
+  polling needed — I'll be notified when it finishes.
+
+✻ Cogitated for 1m 15s
+
+● Dynamic workflow "Ground the agent-beacon &lt;-&gt; blastradius
+threat-rules/CEL integration: deep-read beacon, cross-walk each seam to the
+existing Rust session engine, adversarially check against blastradius
+safety/distribution constraints" completed · 8m 49s
+
+● Workflow completed (13 agents, 626k tokens). Let me read the full structured
+  output to synthesize the design doc.
+
+  Read 1 file (ctrl+o to expand)
+
+● Comprehensive grounding is in. Two factual points from the adversarial pass
+  need a 5-second verification before I write the doc: the actual rule count
+  (one agent said 6, the reviewer said 19) and whether serde_yaml is already a
+  dependency (the reviewer flagged a false "no serde_yaml" premise).
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Both confirmed — 19 rules (not 6; the reviewer caught my initial undercount),
+  serde_yaml is already a dependency, and cel-go v0.28.1 pulls into the Go
+  submodule. Now I'll write the comprehensive design doc.
+
+● Write(docs/agent-beacon-integration.md)
+  ⎿  Wrote 455 lines to docs/agent-beacon-integration.md
+      1 # Integrating agent-beacon Threat Rules (CEL/JSON) into blastradi
+      2 
+      3 **Status:** design — proposed
+      4 **Date:** 2026-06-13
+        + CEL over Beacon
+      6 Event JSON, session correlation, conformance fixtures) and the `b
+      7 CLI relate to blastradius's session layer (`src/session/`), and t
+        he concrete,
+      8 staged plan to adopt the valuable parts without breaking blastrad
+      9 constraints.
+     … +688 lines (ctrl+o to expand)
+
+● Done. Wrote docs/agent-beacon-integration.md — a comprehensive design doc
+  grounded by a 13-agent workflow (deep-read both codebases, cross-walked 5
+  seams, adversarially reviewed against blastradius's hard constraints).
+
+  Headline conclusions:
+
+  - The integration is not greenfield. src/session/ is already a built engine
+  with a hardcoded rule layer that's 1:1 with beacon's CEL. SPEC §11/§23/§24
+  calling it "design only" is stale (Stage 0 fixes that).
+  - Five seams, with verdicts: A) value-free AgentEvent→BeaconEvent projection
+  (export-only, augment) · B) ordered correlation in the toxic-gate, window 
+  dropped since AgentEvent has no per-event timestamp (augment) · C) beacon's
+  embedded-fixtures + conformance gate + maturity ladder + pinned version,
+  Rust-native (augment) · D) beacon scan shell-out dropped · E) the
+  JOIN/scoring/discovery/retro/redaction stay bespoke (the moat).
+  - All four stages add zero dependencies and keep the single static binary.
+
+  What the adversarial pass caught and corrected in the doc (these would have
+  shipped as bugs):
+  1. The canary test only covers 2 renderers — the new beacon JSONL is a third
+  egress path that must be added to the canary loop + routed through sweep.
+  2. The projection must read only NormalizedEvent.join_key (already swept),
+  never raw AgentEvent fields — reduce_command alone isn't enough.
+  3. The "avoid a serde_yaml dep" rationale was factually wrong — serde_yaml 0.9
+  is already in Cargo.toml; the real reason to stay Rust-native is the JOIN +
+  determinism.
+  4. agent-beacon is a Go git submodule (cel-go + ~24 transitive modules) — no
+  build step/test may touch the submodule path; CI must prove cargo build 
+  --target *-musl works with it absent.
+  5. The corpus is 19 rules, not 6 (my initial scout undercounted) —
+  field-pinning must derive from all 19.
+  6. In-binary CEL (both the cel-interpreter crate and a from-scratch evaluator)
+  is explicitly rejected — zero CEL needed.
+
+  One agent (the dependency-constraint reviewer) hit a structured-output hiccup,
+  but its findings came through in the run summary and I verified its two
+  load-bearing claims directly (19 rules, serde_yaml present) before writing.
+
+  The doc ends with a staged plan (0→1→2→3, decline 4), a
+  hard-constraint→wired-control table, open decisions, and file:item
+  touchpoints. Want me to start on Stage 0 (spec reconciliation) or Stage 1 (the
+  conformance harness)?
+
+✻ Baked for 11m 27s
+
+❯ think about the plan again. there was a recent commit to explain "how" and    
+  the "why" - does that work with the CEL beacon stuff ?                        
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● There's the commit: 0368556 dashboard: author why/how impact for all 78 
+  findings + 9 signals. The "9 signals" are exactly the session Signal variants
+  the beacon seams touch. Let me examine what that commit added.
+
+  Read 1 file, ran 2 shell commands (ctrl+o to expand)
+
+● Read it — 0368556 adds src/dashboard/impact.rs: finding_impact(id) -> (why, 
+  how) for all 78 FindingIds and signal_impact(signal) -> why for the 9 Signal
+  names. Hand-authored, value-free, reachability-framed, engine-owned. This
+  matters for the plan, and the short answer is: yes, it works — and it actually
+  strengthens two of the plan's load-bearing decisions while opening one 
+  genuinely new beacon value-add.
+
+  Here's the reasoning, then I'll fold it into the doc.
+
+  1. It reinforces "keep the taxonomy bespoke / corpus Rust-native." The why/how
+  is keyed by blastradius's own identities — FindingId and the 9 Signal names
+  (read_secret, dangerous_shell_pattern, …), the exact strings
+  classify::signal_name emits. If beacon rule ids ever became the rules' primary
+  identity (shared-YAML path), this entire hand-authored layer would be
+  orphaned. So the impact commit is independent evidence for Seam C's
+  "Rust-native, keyed to Signal/FindingId" call and against shared YAML.
+
+  2. Per-seam compatibility — no conflicts:
+  - Seam A (projection): one-way export; doesn't touch Signal/FindingId identity
+  → impact layer untouched. Caveat: the projection's deliberate false-negatives
+  (redacted shapes defeat beacon regexes) mean beacon's emit.reason would be
+  sparse/wrong on projected events. blastradius's authored why/how is richer and
+  authoritative; never let beacon's terser intent-framed reason overwrite it.
+  - Seam B (ordered correlation): changes which toxic combos fire, not
+  Signal/FindingId names → impact layer untouched; the dashboard's derived
+  toxic-chain just reflects the new gate.
+  - Seam C, D, E: no interaction with impact authoring.
+
+  3. Two concrete plan additions this surfaces:
+  - Extend the conformance gate (Seam C) to cover impact authoring. The commit
+  says every id/signal has hand-authored text with "per-class fallback only as a
+  safety net." That's a maturity claim begging for a gate: a stable
+  finding/signal MUST have authored (why, how) — not the fallback. This is
+  beacon's maturity-ladder idea applied to the explanation layer, and it's
+  nearly free.
+  - The one real beacon→impact value-add: standardized taxonomy. beacon rules
+  carry taxonomy: {owasp_llm: LLM06, mitre_atlas: AML.T0024}; impact.rs carries
+  none. Cross-referencing the beacon rule that expresses the same pattern lets
+  us enrich the dashboard with OWASP-LLM / MITRE-ATLAS badges next to the
+  authored why/how — value-free (public standard labels), additive, and
+  credibility-boosting. This is the most concrete place "the CEL beacon stuff"
+  complements the why/how work.
+
+  Let me fold these into the design doc.
+
+● Update(docs/agent-beacon-integration.md)
+  ⎿  Added 8 lines
+      156    test (`report.rs::canary_does_not_leak_through_session_rende
+           rers`) that iterates
+      157    exactly `[render_terminal, render_json]`. Any *new* egress p
+           ath is not covered
+      158    until explicitly added to that loop.
+      159 +- **Authored impact layer** (`src/dashboard/impact.rs`, commit
+          + `0368556`):                                                  
+      160 +  `finding_impact(id) -> (why, how)` for all **78 FindingIds**
+          + and                                                          
+      161 +  `signal_impact(signal) -> why` for all **9 Signal names** — 
+          +hand-authored,                                                
+      162 +  value-free, reachability-framed, **engine-owned** (per-class
+          + fallback only as a                                           
+      163 +  safety net for future ids). **It is keyed by the Rust `Findi
+          +ngId` + `Signal`-name                                         
+      164 +  taxonomy — the same identity the JOIN (`classify.rs`) and th
+          +e toxic catalog use.**                                        
+      165 +  This is independent evidence that the event taxonomy must st
+          +ay bespoke: making                                            
+      166 +  rules CEL/YAML-keyed would orphan the entire hand-authored e
+          +xplanation layer.                                             
+      167  
+      168  ---
+      169  
+
+● Update(docs/agent-beacon-integration.md)
+  ⎿  Added 7 lines
+      333  - **C3.** Phase the build-failing gate to where engine logic i
+           s real: seed it on the
+      334    6 toxic rules whose `evaluate()` is implemented; expand to S
+           tage-A/B signal rules
+      335    as coverage lands. (Avoid a gate over not-yet-real logic blo
+           cking the build.)
+      336 +- **C4.** **Extend the gate to the authored-impact layer** (`i
+          +mpact.rs`, commit                                             
+      337 +  `0368556`). beacon's maturity ladder maps naturally onto the
+          + explanation layer: a                                         
+      338 +  finding/signal at `stable` MUST have hand-authored `(why, ho
+          +w)` — **not** the                                             
+      339 +  per-class fallback. Add a test asserting `finding_impact(id)
+          +.is_some()` for every                                         
+      340 +  catalog `FindingId` and `signal_impact(name).is_some()` for 
+          +every `Signal` name,                                          
+      341 +  so a new id can never silently ship on fallback copy. Nearly
+          + free; keeps the                                              
+      342 +  "no generic text" promise from the commit enforced by CI rat
+          +her than by vigilance.                                        
+      343  
+      344  **[CORRECTION] Reject shared YAML — for the right reason.** Th
+           e first pass justified
+      345  Rust-native by "avoids a `serde_yaml` dep." **`serde_yaml 0.9`
+            is already a direct
+
+● Update(docs/agent-beacon-integration.md)
+  ⎿  Added 25 lines
+      392  `simulate_containment`, and retro re-resolution remain hardcod
+           ed Rust bound to the
+      393  live probe baseline and deterministic numeric scoring.
+      394  
+      395 +### Seam F — Standardized taxonomy enrichment of the impact la
+          +yer — **AUGMENT (optional)**                                  
+      396 +                                                              
+      397 +**Goal.** The one place beacon's *rule metadata* genuinely add
+          +s to the authored                                             
+      398 +why/how (`impact.rs`). beacon rules carry                     
+      399 +`taxonomy: { owasp_llm: LLM06, mitre_atlas: AML.T0024 }`; `imp
+          +act.rs` carries no                                            
+      400 +standardized ids today. Cross-referencing the beacon rule that
+          + expresses the same                                           
+      401 +pattern lets the dashboard show **OWASP-LLM / MITRE-ATLAS badg
+          +es** next to the                                              
+      402 +hand-authored `(why, how)`.                                   
+      403 +                                                              
+      404 +**Design.** Add an optional `taxonomy: &'static [(&str, &str)]
+          +` to the impact entry                                         
+      405 +(or a parallel `finding_taxonomy(id)` / `signal_taxonomy(name)
+          +` accessor), populated                                        
+      406 +by hand from the corresponding beacon rule. Surface it on dash
+          +board finding/signal                                          
+      407 +detail. Value-free by construction — these are public standard
+          + labels, not secrets.                                         
+      408 +                                                              
+      409 +**MUST:**                                                     
+      410 +- **F1.** **[CORRECTION] Vendor the taxonomy ids as committed 
+          +Rust consts** inside                                          
+      411 +  `src/dashboard/` (with a `beacon rule <id> as of <commit>` c
+          +omment). **Do not read                                        
+      412 +  them from the live `agent-beacon` submodule** at build/test 
+          +time — that would                                             
+      413 +  couple a Rust release to a Go submodule checkout (see §5, Go
+          +/Rust boundary).                                              
+      414 +- **F2.** Keep blastradius's authored `(why, how)` authoritati
+          +ve; taxonomy is an                                            
+      415 +  *additional badge*, never a replacement for the reachability
+          +-framed prose, and the                                        
+      416 +  beacon `emit.reason` is **not** imported (it is intent-frame
+          +d and terser).                                                
+      417 +                                                              
+      418 +Effort: **S** (data entry + a render slot).                   
+      419 +                                                              
+      420  ---
+      421  
+      422  ## 5. Hard constraints → wired controls
+
+● Update(docs/agent-beacon-integration.md)
+  ⎿  Added 5 lines, removed 2 lines
+      439  | Stage | Seam(s) | Deliverable | New deps | Effort | Risk |
+      440  |---|---|---|---|---|---|
+      441  | **0** | — | Reconcile SPEC §11/§23/§24 to reflect the built 
+           `src/session/`; note `score` command not built, retro is built
+            | none | S | none |
+      442 -| **1** | C | `conformance.rs` + per-rule `RuleFixture`s + mat
+          -urity + `RULE_PACK_VERSION` + build-failing `pack_conformance`
+          - (per-fixture `!ok`) | none | M | low |                       
+      442 +| **1** | C | `conformance.rs` + per-rule `RuleFixture`s + mat
+          +urity + `RULE_PACK_VERSION` + build-failing `pack_conformance`
+          + (per-fixture `!ok`) + **impact-coverage gate (C4)** over `imp
+          +act.rs` | none | M | low |                                    
+      443  | **2** | A | `beacon_view.rs` value-free projection + extende
+           d canary + determinism test + emit JSONL (advisory/export only
+           ) | none | M | med (value-free) |
+      444  | **3** | B | optional `event_order` ordered correlation (plum
+           bing `None`-default; per-rule enablement later with fixtures) 
+           | none | M | low |
+      445  | **4** | D | **explicitly decline** the shell-out; document t
+           he passive-file alternative as the only future shape | none | 
+           S | n/a |
+      446 +| **5** | F | optional taxonomy (OWASP-LLM / MITRE-ATLAS) enri
+          +chment of `impact.rs`, vendored consts, dashboard badges | non
+          +e | S | low |                                                 
+      447  
+      447 -Recommended order: **0 → 1 → 2 → 3**, with 4 recorded as a del
+          -iberate non-goal.                                             
+      448 +Recommended order: **0 → 1 → 2 → 3**, with 4 recorded as a del
+          +iberate non-goal and                                          
+      449 +5 as optional polish. The impact-coverage gate (C4) and Stage 
+          +5 both build on the                                           
+      450 +`0368556` why/how layer, so they pair naturally once Stage 1 l
+          +ands.                                                         
+      451  Stages are independent enough to land separately; none introdu
+           ces a dependency.
+      452  
+      453  ---
+
+● Update(docs/agent-beacon-integration.md)
+  ⎿  Error editing file
+  Read 1 file, ran 1 shell command (ctrl+o to expand)
+
+● Update(docs/agent-beacon-integration.md)
+  ⎿  Added 2 lines, removed 1 line
+      491    `evaluate` ordered walk; `build_catalog` defaults), `src/ses
+           sion/mod.rs`
+      492    (`pub mod conformance; pub const RULE_PACK_VERSION`), `src/s
+           ession/report.rs`
+      493    (surface version; extend canary loop A4), `src/session/norma
+           lize.rs` (consumer of
+      494 -  `join_key` for A — read-only).                              
+      494 +  `join_key` for A — read-only), `src/dashboard/impact.rs` (C4
+          + impact-coverage gate;                                        
+      495 +  Seam F taxonomy consts — both keyed by the existing `Finding
+          +Id`/`Signal` identity).                                       
+      496  - **Unchanged (moat):** `src/session/classify.rs`, `src/sessio
+           n/score.rs`,
+      497    `src/session/discovery/*`, `src/session/retro.rs`, `src/sess
+           ion/history.rs`.
+      498  - **Docs/CI:** SPEC §11/§23/§24 reconcile (Stage 0); CI musl-b
+           uild-without-submodule
+
+● Updated the design doc. Here's the verdict on your question:
+
+  Yes, the 0368556 why/how layer works with the beacon CEL plan — it doesn't 
+  conflict, and it sharpens the plan in three ways:
+
+  1. It's a third independent vote for "keep the taxonomy bespoke." impact.rs is
+  keyed by FindingId + the 9 Signal names — the same identity the JOIN and
+  toxic catalog use. Going CEL/YAML-keyed for rules would orphan all 78+9
+  hand-authored descriptions. So the impact commit reinforces Seam C's
+  Rust-native call (alongside the JOIN requirement and the determinism
+  requirement).
+  2. New gate — C4 (added to Stage 1). The commit's promise ("no generic text;
+  per-class fallback only as a safety net") is a maturity claim. beacon's
+  maturity-ladder idea applies directly: assert every catalog FindingId/Signal
+  has hand-authored (why, how), not fallback — CI-enforced instead of
+  vigilance-enforced. Nearly free.
+  3. New optional Seam F — taxonomy enrichment. This is the only place beacon's
+  rule metadata genuinely adds to the why/how: beacon rules carry taxonomy: 
+  {owasp_llm, mitre_atlas}; impact.rs carries none. Vendor those public-standard
+  ids (committed consts, not read from the submodule) and badge the dashboard
+  next to the authored prose. Value-free, additive, credibility-boosting.
+
+  One caution baked into the doc (F2 / Seam A): beacon's emit.reason is
+  intent-framed and terser, and on the projected (redacted) event stream it'd be
+  sparse/wrong. blastradius's authored (why, how) stays authoritative; beacon's
+  reason is never imported, only its taxonomy labels.
+
+  Net effect on the plan: stages are now 0 → 1 (now incl. C4) → 2 → 3, decline
+  4, optional 5 (Seam F). No new dependencies anywhere; impact.rs added to the
+  touchpoints. Want me to start Stage 0 + 1, or hold?
+
+✻ Baked for 1m 15s
+
+❯ ok, please do another workflow to really align the blastradius and            
+  agent-beacon stuff. what is the LEAST friction and what doesn't regress ANY   
+  of the stuff in blastradius currently? fine with shelling out or whatever     
+
+● Good — that reframes the optimization target: least friction + zero 
+  regression, with shell-out now on the table as a permitted mechanism. The
+  binding constraint becomes "nothing currently in blastradius changes behavior
+  or goes red" — which means I need to ground the workflow in the actual 
+  regression surface (the test suite, the frozen JSON/CLI/dashboard contracts,
+  the canary, determinism), not just the design. Let me scout that surface, then
+  run the workflow.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● One more thing to pin — src/session/mod.rs:14 says "SCAFFOLD STATUS." Let me
+  read that note; it determines what "regression" even means for the session
+  layer.
+
+  Read 1 file (ctrl+o to expand)
+
+● Two more stale docs confirmed: mod.rs claims session logic "returns
+  empty/default values," but the earlier deep reads showed real implementations
+  with passing assertions (classify, evaluate, compute_score). So both SPEC and 
+  the module doc lag the code — which means the workflow must first establish
+  implemented-vs-stub ground truth, since that is the regression baseline.
+
+  Now I'll run a focused workflow optimizing for least-friction +
+  zero-regression, with shell-out re-evaluated as permitted.
+
+● Workflow(Find the least-friction, zero-regression path to align blastradius
+          with agent-beacon: establish the regression baseline (tests +
+          implemented-vs-stub + frozen contracts), score each alignment action
+          on friction x regression (shell-out now permitted), and adversarially
+          hunt for any regression.)
+  ⎿  /workflows to view dynamic workflow runs
+
+● The zero-regression alignment workflow is running (3 phases, 11 agents:
+  regression baseline → friction×regression per action → adversarial regression
+  hunt). It's grounded in the actual 177-test suite and the frozen contracts,
+  and it re-evaluates shell-out now that you've permitted it. I'll synthesize
+  the least-friction, zero-regression path and fold it into the design doc once
+  it completes — I'll be notified automatically.
+
+✻ Worked for 1m 4s
+
+● Dynamic workflow "Find the least-friction, zero-regression path to align
+blastradius with agent-beacon: establish the regression baseline (tests +
+implemented-vs-stub + frozen contracts), score each alignment action on friction
+x regression (shell-out now permitted), and adversarially hunt for any
+regression." completed · 5m 52s
+
+● The workflow completed cleanly (11 agents). Let me read the full output to
+  extract the per-action friction×regression verdicts and the adversarial
+  regression hunt.
+
+  Read 1 file (ctrl+o to expand)
+
+● Baseline is captured. Let me extract the per-action verdicts and the
+  regression hunt — I'll grep the structured fields rather than page the whole
+  80k-char file.
+
+  Ran 4 shell commands (ctrl+o to expand)
+
+● The hunt found specific landmines but they're in the detail. Let me dump the
+  full hunt section.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Full picture in hand. The workflow validated the plan against the real
+  177-test suite and found exactly the landmines that matter. Let me correct the
+  design doc where the regression hunt caught problems, then add the execution
+  section.
+
+● Update(docs/agent-beacon-integration.md)
+  ⎿  Added 12 lines, removed 7 lines
+      333  - **C3.** Phase the build-failing gate to where engine logic i
+           s real: seed it on the
+      334    6 toxic rules whose `evaluate()` is implemented; expand to S
+           tage-A/B signal rules
+      335    as coverage lands. (Avoid a gate over not-yet-real logic blo
+           cking the build.)
+      336 -- **C4.** **Extend the gate to the authored-impact layer** (`i
+          -mpact.rs`, commit                                             
+      337 -  `0368556`). beacon's maturity ladder maps naturally onto the
+          - explanation layer: a                                         
+      338 -  finding/signal at `stable` MUST have hand-authored `(why, ho
+          -w)` — **not** the                                             
+      339 -  per-class fallback. Add a test asserting `finding_impact(id)
+          -.is_some()` for every                                         
+      340 -  catalog `FindingId` and `signal_impact(name).is_some()` for 
+          -every `Signal` name,                                          
+      341 -  so a new id can never silently ship on fallback copy. Nearly
+          - free; keeps the                                              
+      342 -  "no generic text" promise from the commit enforced by CI rat
+          -her than by vigilance.                                        
+      336 +- **C4.** **Extend the gate to the authored-impact layer (`imp
+          +act.rs`) — SOFT only.**                                       
+      337 +  **[REGRESSION-VERIFIED]** A *strict* gate ("every emitted `F
+          +indingId` has a                                               
+      338 +  bespoke `finding_impact` arm") goes **RED on today's data**:
+          + `cross_repo.dotenv`,                                         
+      339 +  `git.config_exec_directives`, and `claude_code.project_tool_
+          +surface` are emitted                                          
+      340 +  but rely on the class fallback. So ship the **soft** gate: a
+          +ssert every *emitted*                                         
+      341 +  `FindingId` resolves to non-empty `(why, how)` via          
+      342 +  `finding_impact(id).or(finding_impact_class(class))`, and ev
+          +ery `Signal` has                                              
+      343 +  `signal_impact(name)` (all 9 covered today). **Source the id
+          + universe from                                                
+      344 +  probe-emitted ids (a registry/scan), never from `classify::c
+          +andidate_ids`** —                                             
+      345 +  that list contains a phantom `process.sandbox_reach` no prob
+          +e emits, which would                                          
+      346 +  also turn the gate red. Defer the strict per-id-bespoke vari
+          +ant until those three                                         
+      347 +  ids get hand-authored pairs.                                
+      348  
+      349  **[CORRECTION] Reject shared YAML — for the right reason.** Th
+           e first pass justified
+      350  Rust-native by "avoids a `serde_yaml` dep." **`serde_yaml 0.9`
+            is already a direct
+
+● Update(docs/agent-beacon-integration.md)
+  ⎿  Added 8 lines, removed 1 line
+      358  
+      359  ### Seam D — `beacon scan --json` shell-out as a live source —
+            **DROP**
+      360  
+      361 -Shelling out to the Go `beacon` binary is **rejected**. Ground
+          -ed reasons:                                                   
+      361 +Shelling out to the Go `beacon` binary is **rejected** — and *
+          +*[UPDATE]** this holds                                        
+      362 +even though the single-binary/brand objection has been *relaxe
+          +d* by the user                                                
+      363 +("fine with shelling out"). The regression workflow found that
+          + the **passive                                                
+      364 +file-read variant (5b) dominates the subprocess (5a) on the us
+          +er's own two axes**:                                          
+      365 +5b is *both* lower friction (a parser, no subprocess/absent-bi
+          +nary/version-skew                                             
+      366 +handling) *and* lower regression risk (no nondeterminism impor
+          +ted from beacon's                                             
+      367 +mutable rule pack). So "shell-out is allowed" does not make sh
+          +ell-out the right                                             
+      368 +call; the file reader wins regardless. Grounded reasons the su
+          +bprocess loses:                                               
+      369  
+      370  1. **Narrower source.** `beacon scan` reads beacon's own `runt
+           ime.jsonl` (presumes
+      371     beacon installed as collector). `discovery/` already parses
+            14 agents' native
+
+● Update(docs/agent-beacon-integration.md)
+  ⎿  Added 10 lines
+      426  - **F2.** Keep blastradius's authored `(why, how)` authoritati
+           ve; taxonomy is an
+      427    *additional badge*, never a replacement for the reachability
+           -framed prose, and the
+      428    beacon `emit.reason` is **not** imported (it is intent-frame
+           d and terser).
+      429 +- **F3.** **[REGRESSION-VERIFIED] Use a parallel accessor, do 
+          +NOT widen the tuple.**                                        
+      430 +  Add `finding_taxonomy(id) -> Option<…>`; do **not** change  
+      431 +  `finding_impact() -> Option<(&str,&str)>` — three `impact.rs
+          +` tests                                                       
+      432 +  (`known_id_has_copy`, `unknown_id_is_none`, `class_fallback_
+          +covers_every_class`)                                          
+      433 +  and the call site `mod.rs:268` destructure `let (why, how) =
+          + …` and would break.                                          
+      434 +- **F4.** Insert the new keys into **both** `json!` blocks in 
+          +`build_data`                                                  
+      435 +  (ring node `mod.rs:274` **and** findings node `mod.rs:286`) 
+          +for parity, and use                                           
+      436 +  only short codes (`LLM05`, `AML.T0011`) — never secret-shape
+          +d — so                                                        
+      437 +  `page_has_sections_and_is_swept` (`contains_secret_shaped` o
+          +ver final HTML) stays                                         
+      438 +  green. Never touch `src/report/json.rs` (keeps `schema_versi
+          +on` 1.0 frozen).                                              
+      439  
+      440  Effort: **S** (data entry + a render slot).
+      441  
+
+● Now the execution section — the regression-validated do-now/defer matrix.
+
+● Update(docs/agent-beacon-integration.md)  ⎿  Added 54 lines
+      470  Recommended order: **0 → 1 → 2 → 3**, with 4 recorded as a del
+           iberate non-goal and
+      471  5 as optional polish. The impact-coverage gate (C4) and Stage 
+           5 both build on the
+      472  `0368556` why/how layer, so they pair naturally once Stage 1 l
+           ands.
+      473 +                                                              
+      474 +### 6.1 Least-friction, zero-regression execution (regression-
+          +validated)                                                    
+      475 +                                                              
+      476 +Validated against the actual **177-test** suite and the frozen
+          + contracts by a                                               
+      477 +dedicated regression workflow (baseline → friction×regression 
+          +per action →                                                  
+      478 +adversarial regression hunt). The single most important cross-
+          +cutting finding:                                              
+      479 +                                                              
+      480 +> **No do-now action can change a default `scan`/`dashboard` r
+          +un.** `discover_sessions`                                     
+      481 +> is reached only on the `sessions` / `audit-history` / `dashb
+          +oard` *session* paths;                                        
+      482 +> the probe-scan/dashboard path calls `build_data(&report, …, 
+          +None, None)`. All                                             
+      483 +> beacon-facing work is therefore additive to a code path defa
+          +ult scans never touch.                                        
+      484 +                                                              
+      485 +**DO-NOW (least friction, zero/managed regression):**         
+      486 +                                                              
+      487 +| # | Action | Friction | Regression | The catch (from the hun
+          +t) |                                                          
+      488 +|---|---|---|---|---|                                         
+      489 +| 0 | **Doc reconciliation** (SPEC + `mod.rs:14`) | S | none |
+          + docs only; list of false claims below |                      
+      490 +| 3 | **`beacon_view` projection — LIBRARY + TEST-ONLY** (no C
+          +LI, no `lib.rs` wiring) | M | none | canary MUST plant a secre
+          +t in `ShellCommand.command` (the *retained* `join_key`), not o
+          +nly dropped fields, or coverage is vacuous; omit per-event tim
+          +estamps (no clock) |                                          
+      491 +| 2a | **Conformance + maturity + `RULE_PACK_VERSION`** (all 6
+          + rules `status=experimental`) | M | managed | new internal fie
+          +lds on `ToxicCombinationRule` (not the frozen `report::ToxicCo
+          +mbination`); fixtures authored fresh → pass by construction; k
+          +eep `catalog().len()==6` |                                    
+      492 +| 2b | **Impact-coverage gate — SOFT** (C4) | S | managed | st
+          +rict gate is **RED today**; use `finding_impact().or(class_fal
+          +lback)` over *emitted* ids only (see C4) |                    
+      493 +| 6 | **Taxonomy enrichment** (parallel accessor, both `json!`
+          + blocks) | S | managed | do **not** widen the `(why,how)` tupl
+          +e; short codes only (F3/F4) |                                 
+      494 +                                                              
+      495 +**DEFER:**                                                    
+      496 +                                                              
+      497 +| # | Action | Why defer |                                    
+      498 +|---|---|---|                                                 
+      499 +| 4 | Ordered-correlation plumbing | Dead-plumbing until a rul
+          +e actually flips to ordered. The `event_trigger_matched → even
+          +t_trigger_ixs` refactor MUST keep `evaluate()` byte-identical 
+          +(the tests-contracts hunt flagged this as the one refactor lan
+          +dmine). Lower-friction half: add `event_trigger_ixs` + a bool 
+          +wrapper, skip the `event_order` field until a real ordered rul
+          +e + fixtures exist. |                                         
+      500 +| 5 | Consume beacon as a source | If/when wanted, use **5b pa
+          +ssive file reader** (`parse/jsonl_beacon.rs` over `runtime.jso
+          +nl`, marker-gated, off-by-absence, **no CLI flag** — a flag ri
+          +sks `removed_flags_are_rejected`), routed through the same `no
+          +rmalize`+`classify`+Layer-0 redaction. **Never 5a shell-out** 
+          +(§ Seam D). |                                                 
+      501 +                                                              
+      502 +**Stage 0 — the actual stale claims to fix** (everything else 
+          +in SPEC is accurate or                                        
+      503 +legitimately post-MVP — leave the `score` command, `--hook`/Pr
+          +eToolUse block, live                                          
+      504 +`session -- <cmd>` wrap, three-tab single-trace view, `--compa
+          +re-ax`, and                                                   
+      505 +non-Claude/non-Codex parsers labeled as unbuilt):             
+      506 +                                                              
+      507 +1. `src/session/mod.rs:14-16` — the `SCAFFOLD STATUS … logic-b
+          +earing functions                                              
+      508 +   return empty/default values` comment is **flatly false** (a
+          +ll implemented; ~54                                           
+      509 +   passing module tests). Replace with a one-line "implemented
+          +" note. *(Highest                                             
+      510 +   priority — it actively misleads readers/agents, including t
+          +his analysis at first.)*                                      
+      511 +2. SPEC §23.4 (line ~757): "Codex/Cursor are adapter stubs, mo
+          +cked for now" — **false                                       
+      512 +   for Codex** (`parse/jsonl_codex.rs` is a real parser); only
+          + Cursor/others are                                            
+      513 +   detect-only.                                               
+      514 +3. SPEC §23.1 (lines ~648-664): the "(the P1 engine)" label + 
+          +module list omit the                                          
+      515 +   shipped `discovery/`, `retro.rs`, `history.rs`.            
+      516 +4. SPEC §23.14 (lines ~1166-1167): future-tense "before the en
+          +gine is real" delivery                                        
+      517 +   split reads as not-yet-built — mark historical.            
+      518 +5. SPEC lines ~672 and ~1171: "~30 probes / ~35 credential sto
+          +res" transposes the                                           
+      519 +   frozen dashboard constant `{probes:35, stores:30}` (`dashbo
+          +ard/mod.rs:354`) —                                            
+      520 +   should read "~35 probes / ~30 stores".                     
+      521 +                                                              
+      522 +**Frozen contracts no do-now action may move** (regression tri
+          +pwires): `schema_version`                                     
+      523 +`1.0` (`json.rs`); `SessionReport`/`SessionTrace`/`AgentEvent`
+          + serde shapes;                                                
+      524 +`catalog().len()==6`; `RING_ORDER` (6 rings, fixed); the canar
+          +y renderer list;                                              
+      525 +`removed_flags_are_rejected`; the risky-fixture `risk_score==1
+          +00` snapshot;                                                 
+      526 +`determinism_byte_identical`. New work adds *new* fields/modul
+          +es/tests only.                                                
+      527  Stages are independent enough to land separately; none introdu
+           ces a dependency.
+      528  
+      529  ---
+
+● Design doc updated with §6.1 (regression-validated execution). Here's the
+  direct answer to your two questions.
+
+  What's the LEAST friction + regresses nothing — do now
+
+  The workflow validated every action against the real 177-test suite. The clean
+  set, in order:
+
+  1. Doc reconciliation (friction S, regression none) — pure prose. The
+  mod.rs:14 "SCAFFOLD STATUS" comment is flatly false (everything's implemented
+  + ~54 passing tests); plus 4 stale SPEC spans (Codex "mocked," the "P1 engine"
+  label omitting discovery/retro/history, a future-tense delivery split, and a
+  transposed "30 probes/35 stores" vs the frozen {probes:35, stores:30}). No
+  test or build reads these.
+  2. beacon_view projection — library + test-only (friction M, regression none)
+  — new module, no CLI flag, not wired into any run path, brand-new local
+  BeaconEvent type (no serde-roundtrip obligation), reads only value-free
+  join_key, final sweep, no per-event timestamps. The one catch the hunt caught:
+  its canary must plant a secret in ShellCommand.command (the retained shape),
+  not just the dropped fields, or coverage is vacuous.
+  3. Conformance + maturity + RULE_PACK_VERSION (friction M, regression managed)
+  — new fields on the internal ToxicCombinationRule (not the frozen
+  report::ToxicCombination), all 6 rules status=experimental, fresh fixtures
+  that pass by construction, catalog().len()==6 preserved.
+  4. Impact-coverage gate — SOFT only (friction S) — the key landmine: a strict
+  "bespoke arm per id" gate goes RED today (cross_repo.dotenv,
+  git.config_exec_directives, claude_code.project_tool_surface ride the class
+  fallback; classify::candidate_ids even lists a phantom process.sandbox_reach).
+  Ship the soft version: assert every emitted id resolves via
+  finding_impact().or(class_fallback).
+  5. Taxonomy badges (friction S) — parallel finding_taxonomy() accessor, do NOT
+  widen the (why,how) tuple (breaks 3 tests + the call site); insert into both
+  json! blocks; short codes only; never touch json.rs.
+
+  The cross-cutting guarantee
+
+  No do-now action can change a default scan/dashboard run — discover_sessions
+  only runs on the sessions/audit-history/dashboard session paths; the probe
+  path calls build_data(…, None, None). So all beacon work is additive to code
+  paths default scans never reach.
+
+  Defer
+
+  - Ordered correlation — dead-plumbing until a rule actually flips to ordered;
+  and the event_trigger_matched → event_trigger_ixs refactor must stay
+  byte-identical (the one refactor tripwire).
+  - Consume beacon — and notably: even though you OK'd shell-out, the file-read 
+  variant (5b: passive runtime.jsonl parser, marker-gated, no CLI flag) beats 
+  the subprocess (5a) on both your axes — lower friction and lower regression
+  (no absent-binary handling, no nondeterminism from beacon's mutable rule
+  pack). "Shell-out allowed" didn't make shell-out the right call.
+
+  Net: items 1–5 are mergeable now with zero behavior change to existing
+  functionality. Want me to start implementing the do-now set (I'd begin with 1
+  + 2, the cheapest and highest-clarity), on a branch?
+
+✻ Worked for 8m 8s
+
+❯ use a workflow to implement in its entirety                                   
+
+● This is implementation that mutates overlapping files (several stages touch
+  src/session/mod.rs and toxic_combinations.rs), so the workflow must run stages
+  sequentially in the shared tree — not parallel — to keep the code compiling
+  as a coherent whole, with a verify/fix loop at the end. First, a branch so the
+  work is isolated from main.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● On beacon-alignment. Now the implementation workflow — sequential stages (docs
+  → beacon_view → conformance → taxonomy) each leaving the tree compiling and
+  green, then a verify→fix loop. Agents read the design doc's MUST items and
+  operate under hard guardrails (never weaken an existing test, never touch a
+  frozen contract).
+
+● Workflow(export const meta = { … +103 lines)
+  ⎿  Error: Invalid workflow script: Script parse error: Unexpected token 
+     (69:7). Workflow scripts must be plain JavaScript — TypeScript syntax (type
+     annotations like `: string[]`, interfaces, generics) fails to parse.
+
+● Parse error — likely a stray token in one of the long prompt strings. Rather
+  than guess, I'll write the script to a file and node --check it to pinpoint
+  the exact location, then run it via scriptPath.
+
+● Write(/tmp/wf_impl.mjs)
+  ⎿  Wrote 107 lines to ../../../../../tmp/wf_impl.mjs
+       1 export const meta = {
+       2   name: 'beacon-alignment-implement',
+       3   description: 'Implement the do-now beacon alignment set sequen
+         tially with a verify/fix loop; additive-only, zero-regression.',
+       4   phases: [
+       6     { title: 'beacon_view' },
+       7     { title: 'Conformance' },
+       8     { title: 'Taxonomy' },
+       9     { title: 'Verify' },
+      10   ],
+     … +219 lines (ctrl+o to expand)
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Clean — the only flag is the top-level return, which is illegal in a Node
+  module but valid in the workflow runtime (it wraps the script in an async
+  function; the official examples use top-level return). The template-literal
+  soup that broke the first attempt is gone (I switched to string
+  concatenation). Launching via scriptPath.
+  ⎿  /workflows to view dynamic workflow runs
+
+● Implementation workflow launched on beacon-alignment (run wf_00f5c1d0-a7f). It
+  runs the four do-now stages sequentially in the working tree — docs reconcile
+  → beacon_view (lib+test only) → conformance/maturity → taxonomy — each
+  leaving the tree compiling and its targeted tests green, then a full cargo 
+  build + cargo test + self-test-redaction verify with an auto-fix loop (up to 3
+  rounds).
+
+  Guardrails enforced on every agent: additive-only, never weaken an existing
+  test, never touch a frozen contract (schema_version 1.0, RING_ORDER,
+  catalog==6, SessionReport/SessionTrace/AgentEvent serde, the canary array,
+  removed CLI flags) — STOP-and-report if a change would.
+
+  It'll take a bit (several cargo builds). I'll report the per-stage results and
+  the final verify status when it completes — no need to poll. You can watch
+  live with /workflows.
+
+✻ Baked for 2m 6s
+
+● Dynamic workflow "Implement the do-now beacon alignment set sequentially with
+a verify/fix loop; additive-only, zero-regression." completed · 9m 46s
+
+● Workflow completed with 5 agents — that means the 4 implementation stages plus
+  a single verify with zero fix rounds (the fix loop didn't fire). Let me read
+  the full output to confirm the taxonomy stage and the final verify status.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● All green and zero fix rounds — but I shouldn't take the agent's word for it
+  on code changes. Let me independently verify: run the suite myself, confirm
+  the diff, and check that the frozen contracts are actually untouched.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● The grep chain broke on a no-match (expected with &&). More importantly, git 
+  diff main...HEAD is showing committed content plus some files I didn't expect
+  (.design-bundle/*.jsx, page.rs) — I need to see the real state. Let me check
+  git log/status directly and re-run the contract checks without
+  short-circuiting.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● I see what happened — there are 3 commits I didn't make (facaff6 spinner,
+  1fa78e3 why/how inline, 01709eb button removal) stacked on top of 0368556
+  since I branched, and my stages' changes are partly committed, partly not
+  (only the dashboard taxonomy files show uncommitted). That means the repo was 
+  being committed to in parallel while the workflow ran. I won't touch git given
+  that. What matters is whether the current combined tree is actually green —
+  let me verify that myself rather than trust the mid-run verify agent.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Build clean, 186 passed / 0 failed, and the frozen contracts are intact
+  (schema_version "1.0", catalog-len-6 test, removed_flags_are_rejected, the
+  frozen canary fn untouched, RULE_PACK_VERSION added). Let me run the redaction
+  self-test to close the loop on value-free.
+  Ran 1 shell command (ctrl+o to expand)
+
+● Independently verified — everything's green, and I committed nothing. Here's
+  the honest status.
+
+  Implemented (all 4 do-now stages, on beacon-alignment)
+
+  Stage: 0 — Docs
+  What landed: mod.rs SCAFFOLD comment → accurate; 5 stale SPEC spans fixed
+    (Codex-is-real, P1-engine label, historical delivery split, "35 probes/30
+    stores").
+  ────────────────────────────────────────
+  Stage: A — beacon_view.rs (new, 354 lines)
+  What landed: value-free AgentEvent→BeaconEvent projection +
+  render_beacon_jsonl
+    (final sweep), reads only join_key, deterministic ordinal (no clock),
+    library+test-only (no CLI/lib wiring).
+  ────────────────────────────────────────
+  Stage: C — conformance.rs (new, 418 lines)
+  What landed: Verdict/RuleFixture/check_rule/check_maturity + pack_conformance
+    (per-fixture .ok(), avoids the beacon InstallFiles bug); status/version on
+    the 6 rules; RULE_PACK_VERSION const (kept out of the frozen SessionReport);
+
+    SOFT impact-coverage gate (9 signals + 7 classes).
+  ────────────────────────────────────────
+  Stage: F — Taxonomy
+  What landed: parallel finding_taxonomy/signal_taxonomy accessors (tuple not
+    widened), OWASP-LLM/MITRE-ATLAS codes vendored as consts, inserted  into
+  both
+     json! blocks, badge in page.rs.
+
+  My independent verification (not the agent's word)
+
+  - cargo build: clean
+  - cargo test: 186 passed / 0 failed (was 177 → +9 new tests)
+  - self-test-redaction: passed — including the new path (12 canary vectors
+  neutralized across both parser shapes)
+  - Frozen contracts intact: schema_version "1.0", catalog().len()==6 test,
+  removed_flags_are_rejected, the report.rs canary fn — all untouched.
+
+  Zero fix rounds; the verify loop never had to fire.
+
+  ⚠️ One thing you should look at — concurrent git activity
+
+  While the workflow ran, 3 commits I did not author appeared on the branch on
+  top of 0368556: facaff6 (scan spinner), 1fa78e3 (why/how inline + purge
+  fabricated values), 01709eb (remove buggy button). My stage changes ended up
+  partly committed, partly not — only src/dashboard/{impact,mod,page}.rs (the
+  taxonomy stage) are currently uncommitted in git status; the rest
+  (beacon_view.rs, conformance.rs, session/mod.rs, toxic_combinations.rs, SPEC)
+  are committed.
+
+  I did not run any git commit/push. This looks like parallel work in the repo
+  during the run. Before you do anything else, I'd suggest git log/git status
+  your side to confirm those 3 commits are yours and decide how you want the
+  taxonomy changes committed.
+
+  Deferred (per plan, not done)
+
+  - Ordered correlation (Seam B) and consume-beacon (Seam D→5b file-reader) —
+  intentionally deferred.
+  - Seam A4 nuance: the agent did not extend the frozen report.rs canary loop
+  (it's a frozen array literal); instead it added a dedicated in-module canary
+  test in beacon_view.rs. Equivalent coverage, frozen contract respected —
+  flagging so you can decide if you'd rather extend the central loop later.
+  - Minor: two SPEC spans (~1080, ~1216) still say "Codex/Cursor mocked"; the
+  agent fixed only the §23.4 instance as scoped.
+
+  Want me to commit the uncommitted taxonomy changes (once you've confirmed the
+  branch state), tackle Seam B/D, or stop here?
+
+✻ Cogitated for 14m 21s
+
+❯ please fix the git history, commit your changes to not lose them, then        
+  rearrange changes so that history is coherent, then tackle the rest           
+
+● This is history surgery on a shared branch — I need the full picture before
+  touching anything, especially which commit my beacon files actually landed in
+  (they may have been swept into one of the unrelated commits). Let me inspect
+  carefully first; no mutations yet.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Now it's clear: main advanced to 1fa78e3, and the branch has one commit beyond
+  it — 01709eb, whose message is "remove buggy button" but which actually swept
+  up all my beacon work too (a commit -a swallowed my uncommitted files). Plus
+  the taxonomy stage is still uncommitted. So the incoherence is: beacon engine
+  committed under a button-removal message.
+
+  My plan: back everything up, then rebuild from main as three coherent commits
+  — (1) button removal, (2) beacon engine [Stages 0/A/C], (3) taxonomy [Stage F]
+  — reconstructing each file's content per-commit from known blobs (no fragile
+  interactive hunk-splitting). First I need to verify which stream owns the
+  ambiguous files (dashboard/mod.rs, page.rs, the submodule). Read-only
+  inspection:
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Now the ambiguity is resolved:
+  - dashboard/mod.rs in 01709eb = only mod impact; → pub mod impact; — that's my
+  conformance change (swept in), belongs with beacon.
+  - page.rs in 01709eb = purely the button removal (Bridge/onEnter wiring) — no
+  taxonomy.
+  - agent-beacon submodule pointer moved (8a7fca7→0f4d4ea) — the user's, rode in
+  with the button commit.
+
+  So the split is clean by file (no hunk-level surgery needed). Plan:
+  safety-commit + backup branch first, then rebuild from main as U (button) → B
+  (beacon engine) → T (taxonomy), reconstructing each commit's files from known
+  blobs, and finally prove git diff backup == empty (zero content lost).
+
+  Step 0 — never lose anything:
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Safety net confirmed: beacon-alignment-backup at bfe93a1 holds everything. Now
+  reset to main and rebuild — U (button removal) first, preserving the user's
+  original message/authorship via -C.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Commit U looks right (only button-removal files + the submodule pointer). Now
+  commit B (beacon engine, Stages 0/A/C) — restore those files from 01709eb and
+  verify it compiles on its own.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Commit B compiles standalone. Now commit T (taxonomy, Stage F) — restore the
+  final dashboard files from the backup, which leaves a pure taxonomy delta.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Now the integrity proof — the rewritten tip must have a byte-identical tree to
+  the backup — plus the full green re-verify.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+❯ please do not use a different branch, just always work from main. do all the work there 
+
+● Coherent history rebuilt and integrity-proven (git diff backup is empty → zero
+  content changed), 186 tests pass, redaction self-test passes.
+
+  Now addressing your instruction: consolidate everything onto main, no side 
+  branches. Your explicit instruction overrides my usual branch-first default.
+  Since beacon-alignment is just main + my 3 coherent commits (no divergence),
+  I'll fast-forward main to it and delete both side branches. First checking the
+  tree is clean:
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Clean. Consolidating to main via fast-forward and removing the side branches:
+
+  Merged beacon-alignment (ctrl+o to expand)
+
+● Done — main now carries the coherent history and nothing else exists:
+
+  ad1d85d dashboard: add OWASP-LLM / MITRE-ATLAS taxonomy badges (Stage F)
+  96b3dbf feat(session): align with agent-beacon threat-rules (Stages 0/A/C)
+  1fd51f4 dashboard: remove the buggy "...score" button   (your original,
+  authorship preserved)
+  1fa78e3 …(prior main)
+
+  Both side branches deleted; integrity was proven (empty diff vs the backup
+  before deletion); 186 tests + redaction self-test green. Not pushed (you
+  didn't ask). From here on I work only on main.
+
+  Noted for the future: always work on main, no feature branches. Let me save
+  that so I don't default to branching again.
+
+  Recalled 1 memory, wrote 1 memory (ctrl+o to expand)
+
+● There's already a commit-to-main memory covering exactly this — I created a
+  duplicate (and clearly violated that existing preference by branching, which
+  is why you had to correct me). Let me remove the dup; the existing one stands.
+
+  Ran 1 shell command (ctrl+o to expand)
+● The preference was already recorded — apologies for branching against it; that
+  won't happen again. Now tackling the rest (the two deferred stages from
+  "implement in its entirety"), working directly on main:
+  - Seam B — ordered-correlation plumbing (additive event_order, default None →
+  byte-identical evaluate()).
+  - Seam D — the passive file-reader variant (5b): a value-free runtime.jsonl
+  parser registered as a marker-gated agent, not a shell-out.
+
+  A workflow with a verify/fix loop gives the safety net for working directly on
+  main. Writing and syntax-checking it first:
+
+● Write(/tmp/wf_rest.mjs)
+  ⎿  Wrote 89 lines to ../../../../../tmp/wf_rest.mjs
+      1 export const meta = {
+      2   name: 'beacon-alignment-rest',
+      3   description: 'Implement the remaining beacon-alignment stages o
+        acon file-reader, additive + zero-regression, with a verify/fix l
+        oop.',
+      4   phases: [
+      5     { title: 'Seam B ordered correlation' },
+      6     { title: 'Seam D beacon file reader' },
+      8   ],
+      9 }
+     … +174 lines (ctrl+o to expand)
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● node --check flags only line 89 — the top-level return (legal in the workflow
+  runtime, illegal in plain Node). Confirming that's the return, then launching
+  on main.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Confirmed — only the legal top-level return. Launching the workflow on main:
+  ⎿  /workflows to view dynamic workflow runs
+
+● Launched on main (run wf_54f742b3-e70). It implements the two remaining stages
+  sequentially — Seam B (ordered-correlation plumbing, event_order=None default
+  → byte-identical evaluate()) then Seam D (the passive runtime.jsonl
+  file-reader registered as a marker-gated agent, value-free, no shell-out, no
+  CLI flag) — then a full cargo build + cargo test + self-test-redaction verify
+  with up to 3 auto-fix rounds.
+
+  Same guardrails as before (additive-only, frozen contracts untouched), with
+  one narrow allowance: an agent-registry-enumeration test may be extended
+  additively to include the new beacon agent, since that's the correct
+  reflection of the change, not a weakening.
+
+  Everything stays on main, nothing pushed. I'll independently verify the result
+  (build/tests/redaction + confirm no frozen contract moved) and report when it
+  completes — no need to poll.
+
+✻ Worked for 3m 39s
+
+● Dynamic workflow "Implement the remaining beacon-alignment stages on main:
+Seam B ordered-correlation plumbing and Seam D passive beacon file-reader,
+additive + zero-regression, with a verify/fix loop." completed · 3m 29s
+
+● Both stages done, verify green (194 passed, 0 fix rounds). I won't trust the
+  self-report — let me independently verify build/tests/redaction, check the
+  frozen contracts, and inspect the diff (notably why retro.rs changed in Seam
+  D) before committing.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Diff is clean and additive: retro.rs is just the SourceKind enum gaining a
+  JsonlBeacon variant (the enum lives there) — legit Seam D. Frozen contracts
+  all intact (schema_version "1.0", catalog-len-6 test,
+  removed_flags_are_rejected, ToxicCombinationRule still non-Serialize). Now the
+  authoritative build/test/redaction run myself:
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Independently confirmed: build clean, 194 passed / 0 failed, redaction
+  self-test passed, frozen contracts intact. Committing the two stages to main
+  as coherent commits:
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Complete. The entire beacon-alignment plan is implemented and committed to 
+  main, working tree clean, nothing pushed.
+
+  Final state of main
+
+  881e1e7 feat(session): passive agent-beacon runtime.jsonl ingestion (Seam D,
+  5b)
+  34bc84c feat(session): ordered-correlation plumbing for toxic combos (Seam B)
+  ad1d85d dashboard: add OWASP-LLM / MITRE-ATLAS taxonomy badges (Stage F)
+  96b3dbf feat(session): align with agent-beacon threat-rules (Stages 0/A/C)
+  1fd51f4 dashboard: remove the buggy "...score" button   (your commit,
+  preserved)
+
+  What shipped, by stage
+
+  - 0 — Docs: SPEC §23 + mod.rs reconciled to the real (implemented) engine;
+  full design doc in docs/.
+  - A — beacon_view.rs: value-free AgentEvent→BeaconEvent projection,
+  library+test-only, canary + determinism tests.
+  - C — conformance.rs: Rust-native conformance harness (per-fixture .ok(),
+  avoids beacon's InstallFiles bug), status/version on the 6 rules,
+  RULE_PACK_VERSION, SOFT impact-coverage gate.
+  - F — Taxonomy: parallel finding_taxonomy/signal_taxonomy accessors +
+  OWASP-LLM/MITRE-ATLAS badges in both json! blocks.
+  - B — Ordered correlation: event_trigger_ixs single-source-of-truth, optional
+  event_order (None on all 6 → byte-identical evaluate()), greedy ordered-walk
+  clause, 6 new tests.
+  - D — Beacon ingestion (5b): passive runtime.jsonl reader mapping
+  event.action→AgentEvent via the existing value-free extractors, marker-gated /
+  off-by-absence / no shell-out / no CLI flag, routed through the normal
+  normalize+classify path, canary-covered.
+
+  Independently verified (not the agents' word)
+
+  - cargo build clean · 194 tests pass / 0 fail (was 177 → +17) ·
+  self-test-redaction passed · 0 fix rounds across both workflows.
+  - Frozen contracts intact: schema_version "1.0", catalog-len-6,
+  removed_flags_are_rejected, ToxicCombinationRule non-Serialize, the frozen
+  canary array untouched.
+
+  Honored constraints
+
+  Zero new dependencies, no cel-go/no in-binary CEL, no subprocess, value-free +
+  determinism preserved, additive-only. The one allowed test edit was the
+  additive registry-enumeration update for the new beacon agent.
+
+  Intentionally left open (per the plan, not regressions)
+
+  - The 6 shipped rules ship event_order = None — flipping specific rules (e.g.
+  exfiltration_path) to ordered should come with new conformance fixtures (open
+  decision #2).
+  - Beacon ingestion is covered at parser+registry level; an end-to-end
+  discover_sessions temp-HOME test is an optional follow-up.
+  - The prompt-event gap (no AgentEvent prompt variant) stays open by design —
+  closing it would retain prompt text (value-free violation).
+
+  Want me to take any of those follow-ups, or push main?
+
+✻ Cooked for 7m 44s
+
+❯ is this overall an improvement compared to before the agent-beacon            
+  integration? or not? ultrathink and be honest                                 
+
+● Honest answer: it's close to a wash, leaning "not clearly an improvement yet."
+  Most of what I added is latent or speculative; the parts that genuinely
+  improved the product were small and, tellingly, weren't really about
+  agent-beacon at all. Let me defend that claim piece by piece rather than grade
+  my own homework generously.
+
+  The tell: "zero-regression, additive, byte-identical by default"
+
+  I kept reporting those as virtues. They are — for safety. But they're also a
+  diagnosis: when a feature is provably behavior-identical by default, you've
+  mostly added code, not value. "Didn't make it worse" is not "made it better."
+
+  Going stage by stage, honestly
+
+  Stage A — beacon_view.rs (354 lines): net-neutral-to-negative. It's wired into
+  nothing. No CLI command, no run path emits it. Its only purpose is
+  consumption by external beacon tooling that doesn't exist here, and the design
+  doc itself left "does this even ship?" as an open question. Worse, the
+  projection is deliberately lossy — its redacted shapes defeat beacon's
+  value-hungry regexes, so even a hypothetical consumer would under-detect. This
+  is 354 lines of dead, drift-prone code (a hand-mirrored BeaconEvent shape
+  that can silently diverge from beacon's real schema) carrying zero current
+  benefit.
+
+  Stage B — ordered correlation: net-neutral-to-negative right now. event_order 
+  = None on all 6 rules means it does nothing today. Pure dead plumbing for a
+  payoff ("flip a rule to ordered with fixtures") that may never come. The one
+  real sliver of value is the event_trigger_matched → event_trigger_ixs refactor
+  (single source of truth) — a minor code-quality win buried under unused
+  machinery.
+
+  Stage C — conformance: genuinely mixed. The per-rule match/no-match fixtures
+  are a real improvement — they lock in the 6 toxic rules' behavior and catch
+  future regressions, which didn't exist before. But the maturity ladder +
+  RULE_PACK_VERSION are cargo-culted from beacon's context (externally-loaded,
+  network-pulled, mutable rule packs) into ours (6 hardcoded Rust rules).
+  Versioning a static table and labeling everything "experimental" is ceremony,
+  not value. ~418 lines where maybe half earns its keep.
+
+  Stage F — taxonomy badges: small genuine positive. OWASP-LLM/MITRE-ATLAS
+  labels are recognized and add demo/buyer credibility, low-risk. The most
+  defensible user-facing addition — and also the most minor. (Caveat: vendored
+  consts that can drift.)
+
+  Stage D — beacon ingestion: narrow genuine positive. A real new capability,
+  but only for the slice of users running both blastradius and
+  agent-beacon-as-collector. blastradius already ingests 14 native transcript
+  formats; this is one more, niche one. Free when beacon is absent — which is
+  ~everyone.
+
+  Stage 0 — doc reconciliation: real, but not beacon's doing. Fixing the
+  actively-false SCAFFOLD STATUS comment and stale SPEC claims was worth doing —
+  and I'd have wanted to do it regardless of any integration.
+
+  What's actually a bit worse
+
+  - ~1,400 net new lines, much of it unwired — future readers will ask "is
+  beacon_view hooked up? why not?" Unused code is a known clarity tax.
+  - Two new drift surfaces (the BeaconEvent shape, the vendored taxonomy codes)
+  that can go stale and quietly mislead.
+  - For a tool whose brand is minimalism and "we don't fetch-and-run other
+  binaries," bolting on speculative interop with another tool slightly dilutes
+  the focused story — even though I correctly avoided the shell-out.
+
+  Nothing is functionally regressed (verified: 194 tests, redaction clean). The
+  "worse" is maintenance/clarity drag, not user harm.
+
+  The deeper, more honest point
+
+  Every analysis pass kept reaching the same conclusion: keep it bespoke, the 
+  moat is the JOIN, beacon structurally can't express what blastradius does.
+  That's not a footnote — it's the finding. The two tools overlap far less than 
+  the "integrate them" framing assumed. blastradius scores reachability via a 
+  local-baseline JOIN; beacon detects intent over an event stream. The genuinely
+  useful integration surface was therefore tiny (taxonomy labels + optional
+  telemetry ingestion), and I built a fair amount of scaffolding around that
+  small core because the task was "integrate, in its entirety," not "should we
+  integrate."
+
+  So: improvement or not?
+
+  It depends entirely on intent, and I'll be blunt about both branches:
+  - If agent-beacon interop is a committed strategic direction → this is
+  reasonable, well-tested groundwork and the verdict flips mildly positive.
+  - If it was exploratory → then no, it's not worth its weight as-is. The honest
+  move would be to keep the conformance fixtures, the taxonomy badges, the doc 
+  fix, and (optionally) Stage D, and delete the unwired speculation — 
+  beacon_view.rs and the event_order machinery — until there's a real
+  consumer/rule that needs them. That would leave you strictly better than
+  before, with none of the dead-code drag.
+
+  My recommendation: prune Stage A and Stage B's unused parts unless you know
+  you're going to use them soon. The product that actually sells — the static
+  reachability inventory — was untouched by all of this, and that's the thing
+  worth your engineering hours.
+
+✻ Sautéed for 31s
+
+❯ sure, do that. if too difficult, you can just reset back to                   
+  1fd51f4417feb4fd2f9ce909bfbc276b9f73cd60 probably                             
+
+● Surgical prune is clean here (Stage A is a standalone file; Stage B is
+  contained in one file), so I'll do that rather than the nuclear reset — it
+  keeps the conformance fixtures, taxonomy, doc fix, and Stage D. First, confirm
+  nothing else references the code I'm removing:
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Both are fully contained — clean to remove. beacon_view is referenced only by
+  its pub mod line; event_order/event_trigger_ixs live only in
+  toxic_combinations.rs. Let me read mod.rs to make the precise edit, then
+  prune.
+
+  Read 1 file (ctrl+o to expand)
+
+● Update(src/session/mod.rs)
+  ⎿  Removed 1 line
+      14  //! STATUS: the engine is fully implemented and wired into the 
+          `sessions`,
+      15  //! `audit-history`, and `dashboard` subcommands (not a scaffol
+          d).
+      16  
+      17 -pub mod beacon_view;                                           
+      17  pub mod classify;
+      18  pub mod conformance;
+      19  pub mod discovery;
+
+  Ran 1 shell command (ctrl+o to expand)
+● Prune is clean — no dangling references, build green, 185 passed / 0 failed
+  (−9: the 3 beacon_view + 6 event_order tests removed with their dead code),
+  redaction self-test passed. Now a short honest status note in the design doc,
+  then commit.
+
+● Update(docs/agent-beacon-integration.md)
+  ⎿  Error editing file
+
+  Read 1 file, ran 1 shell command (ctrl+o to expand)
+
+● Update(docs/agent-beacon-integration.md)
+  ⎿  Added 19 lines
+      43  
+      44  ---
+      45  
+      46 +## 0.1 Implementation status (as shipped on `main`)            
+      47 +                                                               
+      48 +After an honest review, the integration was trimmed to what ear
+         +ns its weight:                                                 
+      49 +                                                               
+      50 +- **Shipped & kept:** Stage 0 (doc reconciliation), Stage C (co
+         +nformance harness +                                            
+      51 +  per-rule fixtures + maturity/version), Stage F (OWASP-LLM/MIT
+         +RE-ATLAS taxonomy                                              
+      52 +  badges), Stage D (passive `runtime.jsonl` ingestion, marker-g
+         +ated/off-by-absence).                                          
+      53 +- **Pruned as unwired speculation:** **Stage A (`beacon_view.rs
+         +` export)** — wired to                                         
+      54 +  no consumer and lossy by design — and **Stage B's `event_orde
+         +r` machinery** — `None`                                        
+      55 +  on every rule, i.e. a no-op. Both were removed; the Seam A/B 
+         +designs below are                                              
+      56 +  retained as record. Revisit only with a committed consumer (S
+         +eam A) or a rule that                                          
+      57 +  actually needs ordering + fixtures (Seam B).                 
+      58 +                                                               
+      59 +The net keeps the genuine wins (rule-regression fixtures, recog
+         +nized taxonomy labels,                                         
+      60 +optional beacon telemetry ingestion) without carrying dead code
+         +. The static                                                   
+      61 +reachability scanner — the product's asset — was untouched thro
+         +ughout.                                                        
+      62 +                                                               
+      63 +---                                                            
+      64 +                                                               
+      65  ## 1. Ground truth: agent-beacon Threat Rules
+      66  
+      67  ### 1.1 Rule format (`pkg/asymptoteobserve/threatrules/rule.go`
+          , `spec/threat-rules/`)
+
+● Pruned cleanly. Committing on main:
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Done — pruned and committed to main (7fd9461). Final state:
+
+  7fd9461 chore(session): prune unwired beacon speculation (beacon_view +
+  event_order)
+  881e1e7 feat(session): passive agent-beacon runtime.jsonl ingestion (Seam D)
+  34bc84c feat(session): ordered-correlation plumbing (Seam B)   ← its
+  event_order now removed by 7fd9461
+  ad1d85d dashboard: OWASP-LLM/MITRE-ATLAS taxonomy badges (Stage F)
+  96b3dbf feat(session): align with agent-beacon (Stages 0/A/C)  ← its
+  beacon_view now removed by 7fd9461
+  1fd51f4 dashboard: remove buggy "...score" button
+
+  Verified: no dangling refs, build clean, 185 passed / 0 failed (−9 dead-code
+  tests), redaction self-test passed. beacon_view.rs gone; toxic_combinations.rs
+  back to the simpler original event_trigger_matched.
+
+  What's left (the parts that earn their weight):
+  - Stage 0 — doc/spec reconciliation
+  - Stage C — conformance harness + per-rule fixtures + maturity/version (the
+  real regression-protection win)
+  - Stage F — taxonomy badges
+  - Stage D — passive beacon runtime.jsonl ingestion (marker-gated,
+  off-by-absence)
+
+  So compared to before, it's now a modest, honest net improvement — genuine
+  wins, zero dead-code drag, and the static scanner (the actual asset) never
+  touched.
+
+  Two notes:
+  1. History shows add-then-remove for beacon_view/event_order. That's honest
+  but slightly noisy. If you'd rather the additions never appear (a flat history
+  where 96b3dbf/34bc84c never had the pruned code), I can rewrite those two
+  commits via blob-reconstruction — say the word; otherwise the chore commit
+  stands.
+  2. git status shows ?? agent-beacon — that's the submodule's own working
+  state, not my changes; I left it alone.
+
+  Nothing pushed. Want me to flatten the history, or are we good here?
+
+✻ Cogitated for 1m 23s
+
+❯ flatten the history so there's just 1 commit after                            
+  1fd51f4417feb4fd2f9ce909bfbc276b9f73cd60                                      
+
+● On it — squashing everything above 1fd51f4 into one commit via a soft reset
+  (keeps the working tree exactly, just collapses the commits), then proving the
+  resulting tree is byte-identical to the pre-flatten state.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Flattened. There's now exactly one commit after 1fd51f4:
+
+  39dab86 feat(session): align with agent-beacon threat-rules (Stages 0/C/D/F)
+  1fd51f4 dashboard: remove the buggy "...score" button
+  1fa78e3 …(prior)
+
+  Verified safe: git diff between the pre-flatten tip and the new commit is
+  empty — byte-identical tree, so the squash changed history only, not content.
+  Build clean; this exact tree already tested at 185 passed / 0 failed +
+  redaction green.
+
+  That single commit contains the kept work (Stages 0/C/D/F) with the pruned
+  speculation never appearing in history. Nothing pushed; the only working-tree
+  noise is the untracked agent-beacon submodule state, which isn't mine.
+
+✻ Brewed for 18s
+
+❯ /export                                                                       
+  ⎿  Export cancelled
