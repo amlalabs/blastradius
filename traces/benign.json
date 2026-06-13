@@ -1,0 +1,15 @@
+{
+  "session_id": "benign-0001",
+  "agent": "mock",
+  "repo": "blastradius",
+  "started_at": "2026-06-10T09:15:00Z",
+  "events": [
+    { "type": "file_read", "path": "src/lib.rs" },
+    { "type": "file_read", "path": "src/session/trace.rs" },
+    { "type": "file_write", "path": "src/session/score.rs" },
+    { "type": "shell_command", "command": "cargo test" },
+    { "type": "shell_command", "command": "cargo build" }
+  ],
+  "privileged_user": false,
+  "after_hours": false
+}

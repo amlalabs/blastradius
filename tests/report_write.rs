@@ -23,10 +23,6 @@ fn report_write_replaces_symlink_instead_of_following_it() {
         .args([
             "scan",
             "--report",
-            "--max-depth",
-            "0",
-            "--max-repos",
-            "0",
             "--output",
         ])
         .arg(&out)
@@ -64,10 +60,6 @@ fn output_directory_symlink_is_rejected() {
         .args([
             "scan",
             "--report",
-            "--max-depth",
-            "0",
-            "--max-repos",
-            "0",
             "--output",
         ])
         .arg(&out)
@@ -90,10 +82,6 @@ fn output_directory_alone_writes_both_report_formats() {
     let status = Command::new(env!("CARGO_BIN_EXE_blastradius"))
         .args([
             "scan",
-            "--max-depth",
-            "0",
-            "--max-repos",
-            "0",
             "--output",
         ])
         .arg(&out)
@@ -123,10 +111,6 @@ fn report_files_are_private_even_with_permissive_umask() {
         .arg(env!("CARGO_BIN_EXE_blastradius"))
         .args([
             "scan",
-            "--max-depth",
-            "0",
-            "--max-repos",
-            "0",
             "--output",
         ])
         .arg(&out)

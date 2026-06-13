@@ -119,15 +119,15 @@ If an HTTP request is used instead of a bare TLS connect, headers must be boring
 
 Commands (shipped): `scan` (default), `compare`, `report`, `dashboard`, `self-test-redaction`, `version`. Bare `blastradius` ≡ `blastradius scan`. `dashboard [--ai]` is the shipped single-page reachable-surface web UI plus opt-in AI attack-scenario narratives.
 
-Commands (specced, **post-MVP — not yet built**, §23–§24): `score` — the session blast-radius scoring layer (`blastradius score [--baseline baseline.json] [--trace trace.json]`, implicit-live form `blastradius score traces/risky.json`, CI gating `--fail-on-score` reusing exit code 4); the `dashboard` **three-tab session view** (Tabs 2–3) when a trace is supplied; `sessions` / `audit-history` (transcript ingestion + retro-hazard); a future `session -- <cmd>` live wrap; and the orchestrator **matrix** — surfaced as `compare --compare-ax` (§13.1), comparing bare/worktree/Conductor/cmux/ax. None of these exist in the tree yet — `src/session/` and a `score` command are design only (verified §24.0).
+Shipped session commands (§24): `sessions` (read-only, value-free discovery preview of every agent transcript on disk) and `audit-history` (the retro-hazard scan — join historical sessions against the live reachable surface and rank what "already happened and still matters"). The `dashboard` always runs the retro-hazard scan and renders the real `HistoryAuditReport`. Still **post-MVP — not yet built** (§23): a standalone `score` command and the `dashboard` **three-tab live session view** for an injected single trace, a future `session -- <cmd>` live wrap, and the orchestrator **matrix** — surfaced as `compare --compare-ax` (§13.1).
+
+The CLI is deliberately minimal: the tool always runs at full reach (home-wide sibling search, broad env-name heuristics, key NAMES listed, egress + cloud-metadata probes, and — for the session commands and dashboard — discovery of ALL agent transcripts across ALL time). There are no flags to narrow, scope, or disable any of it.
 
 **`scan`** — run the battery once against the current context.
-Flags: `--report` `--json` `--markdown` `--output <dir>` `--max-depth <n>` `--max-repos <n>` `--home-wide` `--verbose` `--env-broad` `--fail-on <severity>`.
-Behavior: build context from process/cwd/home/platform/git → run the probes (egress + cloud-metadata reachability always run) → render terminal summary → optional MD/JSON → never print values.
+Flags: `--report` `--json` `--markdown` `--output <dir>` `--fail-on <severity>`.
+Behavior: build context from process/cwd/home/platform/git → run the probes (always home-wide; egress + cloud-metadata reachability always run; env-name matching always broad; key names always listed) → render terminal summary → optional MD/JSON → never print values.
 
-**`compare`** — run the battery from the repo root and from a temporary detached worktree off the same commit; render side-by-side. Flags: `--report` `--json` `--markdown` `--keep-worktree-on-error` `--output <dir>`. The post-MVP orchestrator matrix is surfaced as `compare --compare-ax` (§13.1). (Details §14.)
-
-**`report`** — convenience for `scan --report`.
+**`compare`** — run the battery from the repo root and from a temporary detached worktree off the same commit; render side-by-side. Flags: `--report` `--json` `--markdown` `--output <dir>`. The post-MVP orchestrator matrix is surfaced as `compare --compare-ax` (§13.1). (Details §14.)
 
 **`self-test-redaction`** — run synthetic fixtures through all shipped renderers (terminal, Markdown, JSON, and the `dashboard` page); assert no canary leaks (§4.4). *(Post-MVP, when the §23 layer lands, this will also feed a synthetic trace through the session-report terminal/JSON/dashboard renderers, planting the canary in the dropped `file_write.diff`/`mcp_call.input` fields and a retained `shell_command.command`. That session-renderer coverage is not yet implemented.)*
 
@@ -1235,7 +1235,7 @@ beyond the demo banner; persisted session history.
 ### 23.18 Open decisions (surface, do not assume)
 
 - **Dashboard bind default.** The default bind is `0.0.0.0:5321`, always — there is no
-  loopback default and no per-mode (e.g. `--history`) bind override. `--bind 127.0.0.1`
+  loopback default and no per-mode bind override. `--bind 127.0.0.1`
   restricts to loopback. A loud no-auth stderr warning prints on any non-loopback bind
   (`src/dashboard/mod.rs`) and MUST be kept by every downstream slice.
 - **Toxic-combo path-weight scale** (`critical +40 / high +25 / medium +15`) is the one
@@ -1342,7 +1342,7 @@ No source emits a native network event; egress is implicit in command shape and 
 
 #### 24.2.6 Incremental, bounded, rotation-aware scanning
 
-MVP default is **ephemeral** (re-parse each run, no persisted cache — aligns with §22 "persisted session history not required"). Discovery is read-only and respects `crate::context::ScanLimits` (verified: `max_history_bytes_per_file` 50 MiB, `follow_symlinks=false`, `cross_filesystems=false`). Files over the byte cap are streamed line-by-line and marked `Truncated`; a `max_age_days` recency window (default `Some(90)` for discovery; `--since` default `7d` for retro) skips-and-counts older files so absence is never read as safety. An **opt-in** `--state` cursor (the beacon `ingest/types.go State` analogue) persists only `{file_id (dev:inode), byte_offset, size_seen, last_session_ids}` — path hashes, offsets, inode ids, session UUIDs only, **zero transcript content** — at `XdgState:blastradius/session-cursor.json` (`0600`, temp+rename, no symlink follow), itself subject to Layer-2 sweep + canary. `--no-cursor` keeps discovery fully stateless/read-only.
+MVP default is **ephemeral** (re-parse each run, no persisted cache — aligns with §22 "persisted session history not required"). Discovery is read-only and respects `crate::context::ScanLimits` (verified: `max_history_bytes_per_file` 50 MiB, `follow_symlinks=false`, `cross_filesystems=false`). Files over the byte cap are streamed line-by-line and marked `Truncated`. Discovery is **unbounded** — `max_age_secs = None`, so every transcript on disk across all time is read; there is no recency window or `--since` flag. Discovery is fully stateless/read-only (re-parse each run; no persisted cursor).
 
 ---
 
@@ -1488,30 +1488,30 @@ The reserved `persistence_path` rule inherits this machinery for free the day §
 
 ### 24.5 CLI surface
 
-bare `blastradius` ≡ `scan` is unchanged. Two new variants are added to the `Command` enum (verified absent today), keeping `scan`/`compare`/`report`/`dashboard`/`self-test-redaction`/`version`:
+bare `blastradius` ≡ `scan` is unchanged. The `Command` enum is `scan`/`compare`/`dashboard`/`sessions`/`audit-history`/`self-test-redaction`. Discovery is always unscoped (every agent, every repo, all of time) — there are no `--since`/`--agent`/`--repo` or scan-tuning flags.
 
-- **`blastradius sessions [--since DUR] [--agent NAME]… [--repo PATH] [--json|--markdown|--report] [--output DIR]`** — read-only, value-free discovery preview (`SessionInventory`): one row per discovered session with per-kind event counts and transcript bytes. Opens each file only far enough to count by kind; never scores, joins, or touches the network. This is the trust gesture the secret-bearing input demands.
-- **`blastradius audit-history [--since DUR] [--agent NAME]… [--repo PATH] [--baseline FILE] [--min-level LEVEL] [--top N] [--fail-on-score N] [--state FILE] [--quiet] [--ai] [--model M] [--json|--markdown|--report] [--output DIR] [scan-tuning flags]`** — the retro scan producing `HistoryAuditReport` (ranked `RealizedHazard`s + `by_finding[]` rollup + aggregate containment sim). With no `--baseline`, runs the `scan` battery **once** as the shared denominator. `--quiet` emits one value-free line per hazard for cron/CI.
+- **`blastradius sessions`** (no flags) — read-only, value-free discovery preview (`SessionInventory`): one row per discovered session with per-kind event counts. Opens each file only far enough to count by kind; never scores, joins, or touches the network. This is the trust gesture the secret-bearing input demands.
+- **`blastradius audit-history [--baseline FILE] [--fail-on-score N] [--quiet] [--json|--markdown|--report] [--output DIR]`** — the retro scan producing `HistoryAuditReport` (ranked `RealizedHazard`s + `by_finding[]` rollup + aggregate containment sim) over ALL discovered transcripts. With no `--baseline`, runs the `scan` battery **once** as the shared denominator. Every ranked hazard is shown (no min-level/top filtering). `--quiet` emits one value-free line per hazard for cron/CI.
 
 **Exit codes (no new codes):** `0` success (incl. empty result — "no sessions"/"none still-reachable" both exit `0` with an explicit message) · `1` runtime error · `3` reserved (compare) · `4` `--fail-on-score` met (reuses `FAIL_ON_MET`). Invalid usage (bad `--since`/`--agent`/out-of-range `N`) must reach **code `2` via a clap `value_parser`** (clap exits 2 pre-`run()`) or an added `exit::USAGE=2` — a bare `Err` would wrongly collapse to `1` (verified: `run()` maps every `Err` to `RUNTIME_ERROR`).
 
 **Required plumbing (verified gaps):**
 - `src/util/time.rs` (today only `now_iso8601`/`iso8601_from_unix`) must add `parse_duration` (`Nd|Nh|Nm|Nw`) and `unix_from_iso8601` (the civil-from-days algorithm reversed) — both `--since` windowing and `recency_days` need epoch seconds; no date dependency is added.
-- `command_line_from`'s `VALUE_FLAGS`/`COMMANDS` allowlists (`src/lib.rs:494-516`) must gain `sessions`, `audit-history`, and `--since`/`--agent`/`--repo`/`--baseline`/`--state`/`--min-level`/`--top`/`--fail-on-score`, so user-supplied paths render as `[value]`, not leaked into the report body.
+- `command_line_from`'s `VALUE_FLAGS`/`COMMANDS` allowlists carry `sessions`, `audit-history`, `--baseline`, and `--fail-on-score`, so user-supplied paths render as `[value]`, not leaked into the report body.
 
 > **Unresolved cross-slice CLI contradiction (open question).** One slice proposed folding discovery under `score --slurp`/`score --list-sessions`; the dedicated-CLI slice proposed top-level `sessions`/`audit-history`. This doc adopts the dedicated verbs as the primary, more fully-specced surface, but both `score` and these verbs are equally greenfield, so the maintainer must pick one and add it explicitly to the §11 verb table + §23.12 (do not introduce a verb implicitly).
 
-**Cron/CI.** `audit-history --since 1d --baseline scan.json --fail-on-score 75` is the CI gate (exit 4). For unattended cron, recommend a cached `--baseline` so a nightly job is not re-running the live scan (and its egress probes) every run, and `--state` for cheap idempotent deltas over a months-deep tree. `--watch`/daemon mode is out of scope; cron is the supported continuous path.
+**Cron/CI.** `audit-history --baseline scan.json --fail-on-score 75` is the CI gate (exit 4). For unattended cron, recommend a cached `--baseline` so a nightly job is not re-running the live scan (and its egress probes) every run. `--watch`/daemon mode is out of scope; cron is the supported continuous path.
 
 ---
 
 ### 24.6 Dashboard — Tab 4 "Session History / Hazards"
 
-A fourth tab driven by injected `D.history = HistoryAuditReport`. `blastradius dashboard --history [--since 7d] [--agent …]… [--baseline FILE] [--repo PATH] [--ai] [--bind ADDR]`. Without `--history`, Tab 4 shows the empty/transparency state (the `sessions` discovery list); Tabs 1–3 are unchanged so the ambient-only demo stays a strict superset. The dashboard **renders, never scores or ranks** — Tab 4 reflects `HistoryAuditReport` exactly, no client-side recompute or re-sort.
+A retro section driven by injected `D.history = HistoryAuditReport`. `blastradius dashboard [--ai] [--model M] [--bind ADDR] [--port N] [--no-open]`. The retro-hazard scan **always runs** — opening the dashboard discovers every agent transcript on disk (all agents, all time) and renders that value-free report; there is no flag to scope or disable it. (If no transcripts are found, the report is empty and the page falls back to the labeled illustrative fixture.) The dashboard **renders, never scores or ranks** — the retro section reflects `HistoryAuditReport` exactly, no client-side recompute or re-sort.
 
 Components (reuse the existing palette, no new hex): `HazardLedger` (ranked rows: rank, level pill, score meter, recency chip with an "approx" marker when `time_source=mtime`, agent chip, value-free headline, toxic-combo tag shown only when one activated); drill-down expanding `reasons[]` (shape-only) where each `finding_ref` chip links to the **same Tab-1 probe node** the live Tab-3 reasons link to (the join is auditable end-to-end; the dashboard mints no finding ids); `FindingHeatStrip` (`by_finding[]`); retro `ContainmentSimulator` (each §23.10 control shows `hazards_suppressed`, e.g. "`no_egress` → would have prevented 4 of 6"). `--ai` stays explain-only; the ledger renders byte-identically with or without it.
 
-**Bind default (load-bearing):** the dashboard's default bind is `0.0.0.0` with **no auth** (verified `src/cli.rs:60`), always — there is no loopback default and **no per-mode override**; `--history` does **not** change it. Tab 4 publishes *which still-reachable credentials an agent actually read* — a precise LAN targeting map — so when Tab 4 is served on a non-loopback bind the existing no-auth stderr warning MUST be kept and extended to name realized-hazard exposure; `--bind 127.0.0.1` is the explicit loopback opt-in. `D.history` is value-free by construction and the whole `D` payload still passes the final `sweep()` before it is written to the socket.
+**Bind default (load-bearing):** the dashboard's default bind is `0.0.0.0` with **no auth** (verified `src/cli.rs`), always — there is no loopback default and **no per-mode override**. Because retro history is on by default, the page publishes *which still-reachable credentials an agent actually read* — a precise LAN targeting map — so on a non-loopback bind the no-auth stderr warning MUST be kept and extended to name realized-hazard exposure; `--bind 127.0.0.1` is the explicit loopback opt-in. `D.history` is value-free by construction and the whole `D` payload still passes the final `sweep()` before it is written to the socket.
 
 ---
 
@@ -1537,7 +1537,7 @@ src/session/                       # NEW subtree — does not exist today; depen
       json_gemini.rs json_dir.rs markdown_aider.rs sqlite_vscdb.rs   # sqlite feature-gated `session-sqlite`
 src/util/time.rs                   # ADD parse_duration + unix_from_iso8601
 src/lib.rs                         # ADD Command::{Sessions,AuditHistory}; extend command_line allowlists; route exit 2
-src/cli.rs                         # ADD SessionsArgs/AuditHistoryArgs; --history on DashboardArgs
+src/cli.rs                         # Sessions (unit) + AuditHistoryArgs; dashboard always discovers history (no flag)
 src/dashboard/{mod.rs,page.rs}     # ADD Tab 4, D.history injection (bind stays global 0.0.0.0; no per-mode override)
 ```
 
@@ -1551,9 +1551,9 @@ src/dashboard/{mod.rs,page.rs}     # ADD Tab 4, D.history injection (bind stays 
 
 - CLI surface contradiction unresolved: dedicated `sessions`/`audit-history` verbs (adopted here as primary) vs folding under `score --slurp`/`score --list-sessions`. Both are greenfield (no `score` command exists yet); maintainer must pick one and add it explicitly to the §11 verb table and §23.12.
 - Ranking constants are not in the brief and must be frozen with fixtures + P1 sign-off (the §23.18 path-weight analogue): combo_base 40/25/15, reach_factor ladder 1.00/0.70/0.45/0.10, durability 1.0+0.15*frac, recency half-life 14d / floor 0.25, the x2.5 normalizer. The §24.3.4 `realized_score` formula is the single source of truth; there is no separate same-session-exit bonus (when `exit_in_session` is true the §23.8 exfiltration_path +40 path-weight is already baked into `combo_base`, so the exit signal is reflected there, not added again).
-- Recency default windows (discovery max_age_days 90, retro --since 7d) trade completeness for bounded work; an older-but-still-reachable cred exfil is skipped unless widened. The recency-excluded count is surfaced, but the defaults need product sign-off.
+- Discovery is unbounded (no recency window): every transcript on disk, across all time, is read. This maximizes completeness (an older-but-still-reachable cred exfil is never skipped) at the cost of more work on a months-deep tree.
 - --state persisted cursor is new on-disk state; §22 lists persisted session history as not-required. It stores only offsets/inode-ids/path-hashes/session-UUIDs (no content) but the maintainer must approve adding any persisted file; default OFF.
-- Dashboard bind: the default is the global `0.0.0.0` with no per-mode override (`--history` does not change it; `--bind 127.0.0.1` restricts to loopback). The extended no-auth warning (naming realized-hazard exposure when Tab 4 is served on a non-loopback bind) is retained as the mitigation.
+- Dashboard bind: the default is the global `0.0.0.0` with no per-mode override (`--bind 127.0.0.1` restricts to loopback). Retro history always runs, so the extended no-auth warning (naming realized-hazard exposure on a non-loopback bind) is retained as the mitigation.
 - --fail-on-score reuses exit 4; if a fleet must distinguish the retro gate from the ambient --fail-on and the session --fail-on-score gates, code 5 is the alternative — maintainer's call.
 - Unverified globs (Cursor CLI ~/.cursor/projects/*/agent-transcripts, Copilot ~/.copilot/session-state, Gemini ~/.gemini/tmp, opencode storage layout) are runtime-probed and format-sniffed rather than asserted; they may be wrong/empty on some versions and need real-machine confirmation.
 - opencode msg_*.json ordering falls back to mtime if ids are non-monotonic in some version — confirm id monotonicity across opencode releases.

@@ -85,14 +85,7 @@ fn reports_do_not_include_raw_command_arg_values() {
     let out = tmp.path().join("audit-secret-value");
 
     let status = std::process::Command::new(env!("CARGO_BIN_EXE_blastradius"))
-        .args([
-            "scan",
-            "--max-depth",
-            "0",
-            "--max-repos",
-            "0",
-            "--output",
-        ])
+        .args(["scan", "--output"])
         .arg(&out)
         .current_dir(tmp.path())
         .stdout(std::process::Stdio::null())

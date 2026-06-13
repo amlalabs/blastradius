@@ -45,6 +45,46 @@ function Reveal({ children, className, style, delay = 0 }) {
   );
 }
 
+/* Vertical auto-scroll marquee for a ring's finding chips. Applies to EVERY
+   ring: animates ONLY when the chip set overflows the height budget (measured,
+   not a fixed count), so short/empty rings render one static set with no motion
+   and any ring with too many chips gently crawls instead of running off-screen.
+   Pure CSS animation, so the global prefers-reduced-motion rule disables it. */
+function ChipMarquee({ findings }) {
+  const boxRef = React.useRef(null);
+  const setRef = React.useRef(null);
+  const [over, setOver] = React.useState(false);
+  const [dur, setDur] = React.useState(24);
+  React.useLayoutEffect(() => {
+    const box = boxRef.current, set = setRef.current;
+    if (!box || !set) return;
+    const measure = () => {
+      const sh = set.scrollHeight;
+      const ov = sh > box.clientHeight + 2;
+      setOver(ov);
+      if (ov) setDur(Math.min(40, Math.max(14, sh / 22))); // ~22px/sec, clamped
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(box);
+    return () => ro.disconnect();
+  }, [findings]);
+  const Chip = (f) => (
+    <span key={f.id} className="mono" style={{ fontSize: 12, padding: "5px 10px", borderRadius: 7,
+      border: `1px solid ${SEV_COLOR[f.sev]}`, color: SEV_COLOR[f.sev], background: "rgba(255,255,255,0.02)" }}>
+      {f.title} · {f.metric}
+    </span>
+  );
+  return (
+    <div ref={boxRef} className={"chip-marquee" + (over ? " is-scrolling" : "")} style={{ marginTop: 22 }}>
+      <div className="chip-marquee__track" style={over ? { animationDuration: dur + "s" } : undefined}>
+        <div className="chip-marquee__set" ref={setRef}>{findings.map(Chip)}</div>
+        {over && <div className="chip-marquee__set" aria-hidden="true">{findings.map(Chip)}</div>}
+      </div>
+    </div>
+  );
+}
+
 const sceneWrap = { minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center",
   justifyContent: "center", padding: "0 24px", position: "relative" };
 
@@ -188,15 +228,7 @@ function RadiusScene({ onEnter }) {
                     {rc.t}
                   </h3>
                   <p style={{ color: "var(--txt-mid)", fontSize: 17, lineHeight: 1.55, margin: 0, maxWidth: 420 }}>{rc.d}</p>
-                  <div style={{ marginTop: 22, display: "flex", flexWrap: "wrap", gap: 8 }}>
-                    {((BR.LIVE_RINGS[i] || BR.RINGS[i]).findings).map((f) => (
-                      <span key={f.id} className="mono" style={{ fontSize: 12, padding: "5px 10px", borderRadius: 7,
-                        border: `1px solid ${SEV_COLOR[f.sev]}`, color: SEV_COLOR[f.sev],
-                        background: "rgba(255,255,255,0.02)" }}>
-                        {f.title} · {f.metric}
-                      </span>
-                    ))}
-                  </div>
+                  <ChipMarquee findings={(BR.LIVE_RINGS[i] || BR.RINGS[i]).findings} />
                 </div>
               );
             })}

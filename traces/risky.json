@@ -1,0 +1,14 @@
+{
+  "session_id": "risky-0001",
+  "agent": "mock",
+  "repo": "blastradius",
+  "started_at": "2026-06-10T23:40:00Z",
+  "events": [
+    { "type": "file_read", "path": "~/.aws/credentials" },
+    { "type": "file_write", "path": ".github/workflows/deploy.yml" },
+    { "type": "shell_command", "command": "git push" },
+    { "type": "network_access", "host": "[custom egress target]", "port": 443 }
+  ],
+  "privileged_user": true,
+  "after_hours": true
+}

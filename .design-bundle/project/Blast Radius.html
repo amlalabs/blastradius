@@ -99,6 +99,29 @@
   @media (prefers-reduced-motion: reduce) {
     * { animation-duration: .001ms !important; animation-iteration-count: 1 !important; }
   }
+
+  /* ---- RadiusScene chip marquee (vertical auto-scroll, overflow-gated) ----
+     Applies to every ring; only the .is-scrolling state (set by JS when the
+     chip set overflows the height budget) animates or masks. */
+  .chip-marquee { position: relative; max-height: clamp(180px, 30vh, 300px); overflow: hidden; }
+  .chip-marquee.is-scrolling {
+    -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 16px, #000 calc(100% - 24px), transparent 100%);
+            mask-image: linear-gradient(to bottom, transparent 0, #000 16px, #000 calc(100% - 24px), transparent 100%);
+  }
+  .chip-marquee__track { display: flex; flex-direction: column; gap: 8px; }
+  .chip-marquee__set   { display: flex; flex-wrap: wrap; gap: 8px; }
+  .chip-marquee.is-scrolling .chip-marquee__track {
+    animation: chipCrawl 24s linear infinite;   /* duration overridden inline per-ring */
+  }
+  .chip-marquee.is-scrolling:hover .chip-marquee__track { animation-play-state: paused; }
+  @keyframes chipCrawl {
+    from { transform: translateY(0); }
+    to   { transform: translateY(calc(-50% - 4px)); }   /* one set + half the 8px track gap */
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .chip-marquee.is-scrolling .chip-marquee__track { animation: none !important; }
+    .chip-marquee.is-scrolling { overflow-y: auto; -webkit-mask-image: none; mask-image: none; }
+  }
 </style>
 </head>
 <body>

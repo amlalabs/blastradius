@@ -12,10 +12,12 @@
 //!
 //! What is live vs. illustrative: the live scan drives the reachable-surface
 //! tallies, the per-ring finding chips in the expanding-radius section, and the
-//! full inventory. The radius/constellation node *geometry* uses a fixed
-//! illustrative layout, and the per-session scoring + retro-hazard sections
-//! (§23/§24) are *illustrative post-MVP fixtures* baked into the page (the
-//! engine is not built) — all clearly labeled as such on the page.
+//! full inventory. The §24 retro-hazard section is driven by the user's REAL
+//! discovered agent transcripts — always (the value-free `HistoryAuditReport`,
+//! over all agents and all time). The radius/constellation node
+//! *geometry* uses a fixed illustrative layout, and the §23 benign-vs-risky
+//! per-session score climax is an illustrative teaching fixture — both clearly
+//! labeled as such on the page.
 
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
@@ -27,6 +29,7 @@ use serde_json::{json, Value};
 use crate::analyze::Analysis;
 use crate::report::redaction::sweep;
 use crate::report::RunReport;
+use crate::session::history::HistoryAuditReport;
 
 mod page;
 
@@ -38,6 +41,11 @@ pub struct ServeOptions {
     pub open_browser: bool,
     /// AI analysis result, or an error string if `--ai` was requested but failed.
     pub analysis: Result<Option<Analysis>, String>,
+    /// Real retro-hazard report (always built from discovered transcripts). `None`
+    /// only when no command supplies one; an empty report (no transcripts found)
+    /// makes the page fall back to the illustrative fixture. Value-free by
+    /// construction; flows through the Layer-2 sweep.
+    pub history: Option<HistoryAuditReport>,
 }
 
 /// The six radius rings, in FIXED outward order. The page lays them out by this
@@ -126,8 +134,13 @@ fn ring_meta(id: &str) -> (&'static str, &'static str) {
     }
 }
 
-/// Build the value-free dashboard JSON from a report (+ optional AI analysis).
-pub fn build_data(report: &RunReport, analysis: &Result<Option<Analysis>, String>) -> Value {
+/// Build the value-free dashboard JSON from a report (+ optional AI analysis +
+/// optional real retro `HistoryAuditReport` for Tab 4).
+pub fn build_data(
+    report: &RunReport,
+    analysis: &Result<Option<Analysis>, String>,
+    history: Option<&HistoryAuditReport>,
+) -> Value {
     // The dashboard reflects the first (primary) context.
     let cr = report.contexts.first();
     let platform = format!("{:?}", report.platform);
@@ -250,6 +263,12 @@ pub fn build_data(report: &RunReport, analysis: &Result<Option<Analysis>, String
         "rings": rings,
         "findings": findings_json,
         "ai": ai,
+        // §24.6 retro section: the real, value-free retro report (always served
+        // when present); null/empty falls back to the labeled illustrative fixture.
+        "history": match history {
+            Some(h) => serde_json::to_value(h).unwrap_or(Value::Null),
+            None => Value::Null,
+        },
     })
 }
 
@@ -265,7 +284,7 @@ pub(crate) fn render_html(data: &Value) -> String {
 
 /// Serve the dashboard until interrupted (Ctrl-C).
 pub fn serve(report: &RunReport, opts: ServeOptions) -> Result<()> {
-    let data = build_data(report, &opts.analysis);
+    let data = build_data(report, &opts.analysis, opts.history.as_ref());
     let html = render_html(&data);
 
     let listener = TcpListener::bind((opts.bind.as_str(), opts.port))
@@ -288,7 +307,25 @@ pub fn serve(report: &RunReport, opts: ServeOptions) -> Result<()> {
         );
         eprintln!("    The page shows your full reachable-credential inventory, escalation paths, and");
         eprintln!("    post-root blast radius. Only do this on a trusted network; use --bind 127.0.0.1");
-        eprintln!("    to restrict to loopback. Ctrl-C to stop.\n");
+        eprintln!("    to restrict to loopback. Ctrl-C to stop.");
+        // §24.6: Tab 4 publishes which still-reachable credentials an agent
+        // actually read — a precise LAN targeting map — so name that exposure
+        // explicitly when real history is served on a non-loopback bind.
+        if let Some(h) = opts.history.as_ref() {
+            let live = h
+                .hazards
+                .iter()
+                .filter(|hz| {
+                    matches!(hz.status, crate::session::retro::HazardStatus::StillReachable)
+                })
+                .count();
+            eprintln!(
+                "    ⚠ retro history: the page publishes {live} STILL-REACHABLE realized hazard(s) — a precise",
+            );
+            eprintln!("      map of which reachable credentials your agents already read.");
+            eprintln!("      Loopback (--bind 127.0.0.1) strongly advised on an untrusted network.");
+        }
+        eprintln!();
     }
 
     if opts.open_browser {
@@ -411,7 +448,7 @@ mod tests {
     #[test]
     fn html_embeds_data_and_is_swept() {
         let report = dummy_report();
-        let data = build_data(&report, &Ok(None));
+        let data = build_data(&report, &Ok(None), None);
         let html = render_html(&data);
         assert!(html.contains("AWS credentials reachable"));
         assert!(html.contains("<!doctype html>") || html.contains("<!DOCTYPE html>"));
@@ -422,7 +459,7 @@ mod tests {
     #[test]
     fn build_data_counts_reachable_classes() {
         let report = dummy_report();
-        let data = build_data(&report, &Ok(None));
+        let data = build_data(&report, &Ok(None), None);
         assert_eq!(data["stats"]["exposed"], 1);
         assert_eq!(data["stats"]["classes"][0]["label"], "CREDENTIALS");
     }
@@ -430,7 +467,7 @@ mod tests {
     #[test]
     fn build_data_emits_six_rings() {
         let report = dummy_report();
-        let data = build_data(&report, &Ok(None));
+        let data = build_data(&report, &Ok(None), None);
         let rings = data["rings"].as_array().expect("rings is an array");
         assert_eq!(rings.len(), 6, "exactly six rings");
         let ids: Vec<&str> = rings.iter().map(|r| r["id"].as_str().unwrap()).collect();
@@ -529,7 +566,7 @@ mod tests {
     #[test]
     fn stats_breadth_present() {
         let report = dummy_report();
-        let data = build_data(&report, &Ok(None));
+        let data = build_data(&report, &Ok(None), None);
         assert!(
             data["stats"]["breadth"]["probes"].is_u64(),
             "breadth.probes is an integer"
@@ -542,7 +579,7 @@ mod tests {
 
     #[test]
     fn page_has_sections_and_is_swept() {
-        let data = build_data(&dummy_report(), &Ok(None));
+        let data = build_data(&dummy_report(), &Ok(None), None);
         let html = render_html(&data);
         assert!(!crate::report::redaction::contains_secret_shaped(&html));
         assert!(html.contains("illustrative — post-MVP, not from your scan"));
@@ -552,10 +589,74 @@ mod tests {
         assert!(html.contains("id=\"br-data\""));
     }
 
+    /// Build a small real `HistoryAuditReport` from a value-free trace so the
+    /// `D.history` injection path can be exercised end-to-end.
+    fn sample_history() -> HistoryAuditReport {
+        use crate::finding::{Finding, FindingClass, FindingScope};
+        use crate::session::trace::{AgentEvent, SessionTrace};
+        use crate::severity::{Confidence, Severity};
+        let baseline = vec![
+            Finding::new(
+                "aws.credentials.profiles",
+                FindingClass::Credentials,
+                FindingScope::Ambient,
+                "AWS creds",
+                Severity::Exposed,
+                Confidence::Confirmed,
+            ),
+            Finding::new(
+                "egress.connectivity",
+                FindingClass::Egress,
+                FindingScope::Network,
+                "egress",
+                Severity::Exposed,
+                Confidence::Confirmed,
+            ),
+        ];
+        let trace = SessionTrace {
+            session_id: "X".into(),
+            agent: "claude-code".into(),
+            repo: Some("app".into()),
+            started_at: Some("2026-06-10T00:00:00Z".into()),
+            events: vec![
+                AgentEvent::FileRead {
+                    path: "~/.aws/credentials".into(),
+                },
+                AgentEvent::NetworkAccess {
+                    host: "evil.example".into(),
+                    port: 443,
+                },
+            ],
+            privileged_user: false,
+            after_hours: false,
+        };
+        let now = crate::util::time::unix_from_iso8601("2026-06-13T00:00:00Z").unwrap();
+        crate::session::history::build_history_report(&baseline, &[trace], now, Vec::new())
+    }
+
+    #[test]
+    fn history_absent_emits_null_present_emits_report() {
+        // Without history, D.history is null.
+        let none = build_data(&dummy_report(), &Ok(None), None);
+        assert!(none["history"].is_null(), "history is null when absent");
+        // With history, D.history is the real value-free report.
+        let h = sample_history();
+        let data = build_data(&dummy_report(), &Ok(None), Some(&h));
+        assert!(data["history"].is_object(), "history present when injected");
+        assert!(
+            !data["history"]["hazards"].as_array().unwrap().is_empty(),
+            "real hazard flows into D.history"
+        );
+        assert_eq!(data["history"]["hazards"][0]["session"]["agent"], "claude-code");
+        // The rendered page that consumes D.history stays value-free.
+        let html = render_html(&data);
+        assert!(!crate::report::redaction::contains_secret_shaped(&html));
+    }
+
     #[test]
     fn planted_canary_in_page_is_swept() {
         const CANARY: &str = "ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ012345";
-        let mut data = build_data(&dummy_report(), &Ok(None));
+        let mut data = build_data(&dummy_report(), &Ok(None), None);
         // Inject a shaped canary into a Value field, then run the SAME path
         // render_html uses: to_string → </ guard → marker replace → sweep.
         data["canary"] = json!(CANARY);

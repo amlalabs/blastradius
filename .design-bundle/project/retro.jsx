@@ -16,9 +16,15 @@ function StatusPill({ status }) {
     padding: "2px 8px", borderRadius: 5, letterSpacing: 1, whiteSpace: "nowrap" }}>{m.t}</span>;
 }
 
+// Combo display fallback for real combos not in the illustrative catalog.
+function comboMeta(combo) {
+  const BR = window.BR;
+  return BR.COMBOS[combo] || { title: combo, sev: "high" };
+}
+
 function HazardCard({ hz, res, dead }) {
   const BR = window.BR;
-  const combo = BR.COMBOS[hz.combo];
+  const combo = comboMeta(hz.combo);
   const acol = AGENT_COLOR[hz.agent] || "var(--txt-mid)";
   const sevCol = hz.sev === "critical" ? "var(--crit)" : "var(--hot)";
   const live = res.status === "still_reachable";
@@ -69,7 +75,7 @@ function HazardCard({ hz, res, dead }) {
 
 function ReviewGapCard({ rg }) {
   const BR = window.BR;
-  const combo = BR.COMBOS[rg.combo];
+  const combo = comboMeta(rg.combo);
   const acol = AGENT_COLOR[rg.agent] || "var(--txt-mid)";
   return (
     <div style={{ border: "1px dashed var(--line-2)", borderRadius: 14, padding: "16px 18px", background: "rgba(255,255,255,.02)" }}>
@@ -99,6 +105,7 @@ function ReviewGapCard({ rg }) {
 
 function RetroSection() {
   const BR = window.BR;
+  const real = !!BR.HAS_HISTORY;
   const [dead, setDead] = React.useState(new Set());
   const toggleDead = (id) => setDead((p) => { const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n; });
 
@@ -118,7 +125,12 @@ function RetroSection() {
             <span className="mono" style={{ color: "var(--txt-dim)", letterSpacing: 3, fontSize: 12 }}>
               AND THE SESSIONS THAT ALREADY RAN
             </span>
-            <IllustrativeBadge />
+            {real
+              ? <span className="mono" style={{ fontSize: 10, fontWeight: 600, color: "var(--safe)",
+                  border: "1px solid var(--safe)", padding: "2px 8px", borderRadius: 5, letterSpacing: 0.5, whiteSpace: "nowrap" }}>
+                  from your scan
+                </span>
+              : <IllustrativeBadge />}
           </div>
           <h2 style={{ fontSize: "clamp(28px,4.4vw,52px)", fontWeight: 600, margin: 0, lineHeight: 1.08, letterSpacing: "-0.02em" }}>
             Your agents left transcripts<br />on this machine. We read what<br />they <span style={{ color: "var(--hot)" }}>already did.</span>
@@ -134,10 +146,17 @@ function RetroSection() {
         <div style={{ marginTop: 34, padding: "16px 18px", background: "var(--bg-1)", border: "1px solid var(--line)", borderRadius: 14 }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap", marginBottom: 12 }}>
             <span className="mono" style={{ fontSize: 11, color: "var(--txt-dim)", letterSpacing: 2 }}>
-              DISCOVERED LOCALLY — {totalSessions} SESSIONS ACROSS {BR.AGENTS_DISCOVERED.length} AGENTS
-              <span style={{ color: "var(--txt-dim)", letterSpacing: 0, fontWeight: 400 }}> · extended demo roster</span>
+              {real
+                ? `DISCOVERED LOCALLY — ${totalSessions} SESSION${totalSessions === 1 ? "" : "S"} WITH HAZARDS ACROSS ${BR.AGENTS_DISCOVERED.length} AGENT${BR.AGENTS_DISCOVERED.length === 1 ? "" : "S"}`
+                : `DISCOVERED LOCALLY — ${totalSessions} SESSIONS ACROSS ${BR.AGENTS_DISCOVERED.length} AGENTS`}
+              {!real && <span style={{ color: "var(--txt-dim)", letterSpacing: 0, fontWeight: 400 }}> · extended demo roster</span>}
             </span>
-            <IllustrativeBadge />
+            {real
+              ? <span className="mono" style={{ fontSize: 10, fontWeight: 600, color: "var(--safe)",
+                  border: "1px solid var(--safe)", padding: "2px 8px", borderRadius: 5, letterSpacing: 0.5, whiteSpace: "nowrap" }}>
+                  from your scan
+                </span>
+              : <IllustrativeBadge />}
           </div>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
             {BR.AGENTS_DISCOVERED.map((a) => (

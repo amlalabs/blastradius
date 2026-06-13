@@ -140,9 +140,10 @@ impl Default for ScanLimits {
 /// inventory off-machine is the opt-in `dashboard --ai` call, handled separately.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ScanOptions {
-    /// Whether broad env-name heuristics are enabled (`--env-broad`, §12.5).
+    /// Whether broad env-name heuristics are enabled (§12.5). Always true in the
+    /// CLI; the field stays so tests/internal callers can scope it.
     pub env_broad: bool,
-    /// Whether to list env/dotenv key names (`--verbose`).
+    /// Whether to list env/dotenv key names. Always true in the CLI.
     pub verbose: bool,
 }
 

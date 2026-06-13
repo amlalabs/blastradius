@@ -230,6 +230,15 @@
       nodes: ["browser.session_stores", "egress.connectivity"],
       evidence: ["read a browser session store", "+ outbound egress open", "→ session token can leave the host"],
     },
+    post_root_host_visibility: {
+      name: "post_root_host_visibility",
+      title: "Post-root host visibility",
+      sev: "critical",
+      derived: "An escalation path plus cross-repo reach means a foothold here composes into broader host + neighbor visibility.",
+      legs: ["host.privilege_escalation", "cross_repo.sibling_repos"],
+      nodes: ["host.privilege_escalation", "cross_repo.sibling_repos"],
+      evidence: ["escalation path reachable", "+ cross-repo reach present", "→ foothold composes into the host"],
+    },
   };
 
   // ---- Containment simulator ---------------------------------------------
@@ -302,7 +311,7 @@
   // ---- §24 AUTO-SLURP + RETRO-HAZARD -------------------------------------
   // Passively discovered agent transcripts on disk (§24.1) and the historical
   // hazards re-resolved against TODAY's reachable surface (§24.3).
-  const AGENTS_DISCOVERED = [
+  const AGENTS_DISCOVERED_FIXTURE = [
     { tag: "claude-code", name: "Claude Code", sessions: 14 },
     { tag: "codex",       name: "Codex CLI",   sessions: 6 },
     { tag: "cursor",      name: "Cursor",      sessions: 9 },
@@ -323,7 +332,7 @@
 
   // Historical hazards. `required` = finding ids that must still fire for the
   // hazard to be live. `deadAtStart` = legs already remediated since the session.
-  const HAZARDS = [
+  const HAZARDS_FIXTURE = [
     { hid: "3f2a…e1", agent: "claude-code", source: "~/.claude/projects/app/3f2a…e1.jsonl",
       age: "3 days ago", ageDays: 3, combo: "exfiltration_path", sev: "critical",
       required: ["aws.credentials.profiles", "egress.connectivity"], base: 40,
@@ -356,7 +365,7 @@
   function reviewScore(ageDays) {
     return Math.max(0, Math.min(60, Math.round(25 * retroDecay(ageDays) * 1.5)));
   }
-  const REVIEW_GAPS = [
+  const REVIEW_GAPS_FIXTURE = [
     { hid: "77aa…10", agent: "claude-code", age: "5 days ago", ageDays: 5,
       combo: "high_review_risk", sev: "high",
       review_score: reviewScore(5),
@@ -370,12 +379,15 @@
   //   0.45 — only some legs live (partial)
   //   0.10 — no legs live (remediated)
   // Severity is read from the live finding when present, else the fixture FINDING.
-  function reachTier(legs) {
+  // Severity of a leg: prefer the hazard's own per-leg severity (real report),
+  // else the live/fixture FINDINGS table.
+  function reachTier(legs, hz) {
     const liveLegs = legs.filter((l) => l.live);
     if (liveLegs.length === 0) return 0.10;
     const allLive = liveLegs.length === legs.length;
     if (!allLive) return 0.45;
     const sevOf = (fid) => {
+      if (hz && hz.legSev && hz.legSev[fid]) return hz.legSev[fid];
       const lf = FINDINGS[fid];
       return lf ? lf.sev : null;
     };
@@ -384,21 +396,142 @@
   }
 
   // Re-resolve one hazard against today's findings minus the `dead` set.
+  // For a real CLI hazard with NO user remediation toggled, reflect the report's
+  // authoritative status/score verbatim (§24.6: the dashboard renders, never
+  // re-scores). Toggling a remediation switches to the interactive what-if model.
   function retroResolve(hz, dead) {
     const deadAll = new Set([...(hz.deadAtStart || []), ...dead]);
     const legs = hz.required.map((fid) => ({ ref: fid, live: !deadAll.has(fid) }));
     const liveCount = legs.filter((l) => l.live).length;
     const allLive = liveCount === hz.required.length;
+
+    const noUserToggle = !dead || dead.size === 0;
+    if (noUserToggle && hz.realizedFromReport != null && hz.statusFromReport) {
+      const map = { still_reachable: "still_reachable", partially_remediated: "partial",
+        remediated_since: "remediated", review_gap: "remediated" };
+      const status = map[hz.statusFromReport] || (allLive ? "still_reachable" : (liveCount > 0 ? "partial" : "remediated"));
+      return { legs, status, realized: hz.realizedFromReport, live: status === "still_reachable" };
+    }
+
     const status = allLive ? "still_reachable" : (liveCount > 0 ? "partial" : "remediated");
-    const reach = reachTier(legs);
+    const reach = reachTier(legs, hz);
     const durability = 1 + 0.15 * (liveCount / hz.required.length);
     const realized = Math.max(0, Math.min(100, Math.round(hz.base * reach * durability * retroDecay(hz.ageDays) * 2.5)));
     return { legs, status, realized, live: allLive };
   }
 
+  // ---- Real retro history from the CLI (D.history = HistoryAuditReport) ----
+  // When `dashboard --history` is served, D.history is the value-free
+  // HistoryAuditReport. We map it into the same fixture SHAPE the ledger renders
+  // so retroResolve()/HazardCard/ReviewGapCard work unchanged. Everything here is
+  // value-free already (ids, severities, counts, shortened labels, RFC3339).
+  const AGENT_NAMES = {
+    "claude-code": "Claude Code", "codex": "Codex CLI", "cursor": "Cursor",
+    "cursor-ide": "Cursor IDE", "copilot": "Copilot CLI", "opencode": "opencode",
+    "gemini": "Gemini CLI", "antigravity": "Antigravity", "factory": "Factory Droid",
+    "devin": "Devin", "windsurf": "Windsurf", "aider": "Aider", "hermes": "Hermes", "amp": "Amp",
+  };
+  const agentName = (tag) => AGENT_NAMES[tag] || tag;
+
+  // Human "N days ago" from an age in days (value-free count).
+  function ageLabel(days) {
+    const d = Math.max(0, Math.round(days));
+    if (d === 0) return "today";
+    if (d === 1) return "1 day ago";
+    return d + " days ago";
+  }
+
+  // base path-weight from the toxic-combo severity (mirrors §24.3.4 combo_base).
+  const COMBO_BASE = { critical: 40, high: 25, medium: 15, low: 0 };
+
+  // Map one HistoricalHazard JSON -> the fixture HAZARD shape the ledger renders.
+  function mapHazard(h) {
+    const sess = h.session || {};
+    const legs = (h.reachability && h.reachability.legs) || [];
+    const required = legs.filter((l) => l.required).map((l) => l.finding_ref);
+    // legs already remediated NOW (required but not currently present) seed deadAtStart.
+    const deadAtStart = legs
+      .filter((l) => l.required && !l.current)
+      .map((l) => l.finding_ref);
+    // per-leg current severity straight from the report (value-free).
+    const legSev = {};
+    legs.forEach((l) => { if (l.current && l.current.severity) legSev[l.finding_ref] = l.current.severity; });
+    // value-free observed-event lines: reduce the combo evidence (shape-only).
+    const events = ((h.combination && h.combination.evidence) || []).slice(0, 4);
+    const orderingLabel = {
+      secret_read_precedes_egress: "read → egress",
+      egress_precedes_secret_read: "egress → read",
+      unordered: null,
+    }[h.ordering];
+    return {
+      hid: h.hazard_id,
+      agent: sess.agent || "unknown",
+      source: sess.source_label || "",
+      age: ageLabel((h.recency && h.recency.age_days) || 0),
+      ageDays: (h.recency && h.recency.age_days) || 0,
+      combo: (h.combination && h.combination.name) || "",
+      sev: (h.combination && h.combination.severity) || "high",
+      required,
+      base: COMBO_BASE[(h.combination && h.combination.severity) || "high"] || 0,
+      ordering: orderingLabel || undefined,
+      deadAtStart,
+      legSev,
+      events,
+      summary: h.summary || "",
+      // the CLI already ranked & resolved this; carry its authoritative values so
+      // the page reflects (never re-scores) the report on first paint (§24.6).
+      realizedFromReport: h.realized_score,
+      statusFromReport: h.status,
+    };
+  }
+
+  function mapReviewGap(h) {
+    const sess = h.session || {};
+    return {
+      hid: h.hazard_id,
+      agent: sess.agent || "unknown",
+      age: ageLabel((h.recency && h.recency.age_days) || 0),
+      ageDays: (h.recency && h.recency.age_days) || 0,
+      combo: (h.combination && h.combination.name) || "high_review_risk",
+      sev: (h.combination && h.combination.severity) || "high",
+      review_score: h.realized_score,
+      events: ((h.combination && h.combination.evidence) || []).slice(0, 4),
+      summary: h.summary || "",
+    };
+  }
+
+  // Roll the discovered hazards' sessions up into a per-agent discovery roster.
+  function rosterFromHistory(H) {
+    const all = [...(H.hazards || []), ...(H.review_gaps || [])];
+    const byAgent = {};
+    const seen = {};
+    all.forEach((h) => {
+      const tag = (h.session && h.session.agent) || "unknown";
+      const sid = (h.session && h.session.session_id) || h.hazard_id;
+      const key = tag + ":" + sid;
+      if (seen[key]) return;
+      seen[key] = true;
+      byAgent[tag] = (byAgent[tag] || 0) + 1;
+    });
+    return Object.keys(byAgent).sort().map((tag) => ({
+      tag, name: agentName(tag), sessions: byAgent[tag],
+    }));
+  }
+
+  const HAS_HISTORY = !!(D.history && (
+    (D.history.hazards && D.history.hazards.length) ||
+    (D.history.review_gaps && D.history.review_gaps.length) ||
+    (D.history.discovery_diagnostics && D.history.discovery_diagnostics.length)
+  ));
+
+  const HAZARDS = HAS_HISTORY ? (D.history.hazards || []).map(mapHazard) : HAZARDS_FIXTURE;
+  const REVIEW_GAPS = HAS_HISTORY ? (D.history.review_gaps || []).map(mapReviewGap) : REVIEW_GAPS_FIXTURE;
+  const AGENTS_DISCOVERED = HAS_HISTORY ? rosterFromHistory(D.history) : AGENTS_DISCOVERED_FIXTURE;
+
   window.BR = {
     RINGS, LIVE_RINGS, FINDINGS, SESSIONS, COMBOS, CONTROLS, LADDER, RESIDUAL,
     AGENTS_DISCOVERED, REMEDIATIONS, HAZARDS, REVIEW_GAPS, retroResolve,
+    HAS_HISTORY,
     counts, levelOf, simulate,
     BREADTH: {
       probes: (D.stats && D.stats.breadth && D.stats.breadth.probes) || 35,

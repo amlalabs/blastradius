@@ -1,5 +1,5 @@
 //! §12.5 — environment-variable secret NAMES (never values). Curated-first;
-//! broad regex is opt-in (`--env-broad`) and reported at most `Notable`.
+//! the broad regex is always on and reported at most `Notable`.
 
 use regex::Regex;
 use serde_json::json;

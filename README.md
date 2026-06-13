@@ -93,17 +93,21 @@ blastradius dashboard --ai       # + AI-generated attack-scenario narratives
 
 `dashboard` runs a scan and serves a local web page (value-free, swept): a
 narrative walkthrough of the reachable surface. Its reachable-surface rings and
-tallies are **live from the scan** (severities and the full inventory). The
-per-session blast-radius score and the retro-hazard sections are **illustrative
-post-MVP fixtures** (labeled as such on-page) — there is no session-scoring
-engine in the tree yet. The page loads React/Babel and webfonts from a CDN to
-render (those carry no scan data). It binds `0.0.0.0:5321` by default; override
-with `--bind`/`--port`.
+tallies are **live from the scan** (severities and the full inventory). **It
+always also runs the §24 retro-hazard scan over every agent transcript on disk**
+(Claude Code, Codex, Cursor, …, across all time) and renders, value-free, which
+historical sessions "already happened and still matter" today. The benign-vs-risky
+per-session blast-radius score remains an **illustrative teaching fixture**
+(labeled on-page) — there is no live per-session scoring of your own sessions in
+the dashboard view. The page loads React/Babel and webfonts from a CDN to render
+(those carry no scan data). It binds `0.0.0.0:5321` by default; override with
+`--bind`/`--port`.
 
 > ⚠ The dashboard has **no authentication** and renders your full reachable-credential
-> inventory, escalation paths, and post-root blast radius. Binding to `0.0.0.0`
-> exposes that to your whole network — only do so on a trusted network. Use
-> `--bind 127.0.0.1` to restrict it to loopback.
+> inventory, escalation paths, post-root blast radius, and which still-reachable
+> credentials your agents already read — a precise targeting map. Binding to
+> `0.0.0.0` exposes that to your whole network — only do so on a trusted network.
+> Use `--bind 127.0.0.1` to restrict it to loopback.
 
 `--ai` additionally asks the OpenAI API to describe, **for your own defensive
 awareness**, how the *reachable* credentials/identities could be chained — attack
@@ -138,13 +142,17 @@ cloud-metadata (169.254.169.254) reachability the same way.
 blastradius scan                 # run the battery once (default command)
 blastradius scan --report        # also write ./blastradius-report.{md,json}
 blastradius scan --output audit  # write audit/blastradius-report.{md,json}
-blastradius scan --verbose       # list env/.env key NAMES (never values)
-blastradius scan --env-broad     # opt-in heuristic env matching (Notable only)
 blastradius compare              # repo-root vs temporary worktree, side by side
 blastradius dashboard            # serve a local web dashboard of the reach
 blastradius dashboard --ai       # + AI attack-scenario narratives (opt-in; sends value-free inventory)
+blastradius sessions             # value-free preview of every discovered transcript
+blastradius audit-history        # retro-hazard scan over all transcripts
 blastradius self-test-redaction  # assert no synthetic secret leaks any renderer
 ```
+
+Every scan runs at full reach automatically — home-wide sibling search, broad
+env-name heuristics, key NAMES listed (value-free), and the network egress +
+cloud-metadata probes. There are no flags to narrow, scope, or disable any of it.
 
 Exit codes: `0` success · `1` runtime error · `2` invalid usage · `3` compare
 outside a git repo · `4` `--fail-on <severity>` threshold met (CI: `--fail-on exposed`).

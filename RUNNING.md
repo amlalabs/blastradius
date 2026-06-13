@@ -36,12 +36,13 @@ install -m755 target/release/blastradius ~/.local/bin/blastradius
 ```sh
 blastradius                  # default command == `scan`
 blastradius scan             # the reachability battery, printed to the terminal
-blastradius scan --verbose   # also list env/.env key NAMES (never values)
 ```
 
-Findings are grouped by class (Credentials, Cross-repo, Git write, Egress,
-Process, Host persistence, System info) and sorted by severity
-(`exposed` > `notable` > `info`).
+Every scan runs at full reach automatically — home-wide sibling search, broad
+env-name heuristics, and key NAMES listed (value-free). There are no flags to
+narrow or disable any of it. Findings are grouped by class (Credentials,
+Cross-repo, Git write, Egress, Process, Host persistence, System info) and sorted
+by severity (`exposed` > `notable` > `info`).
 
 ### Write report files
 
@@ -49,7 +50,6 @@ Process, Host persistence, System info) and sorted by severity
 blastradius scan --report            # writes ./blastradius-report.{md,json}
 blastradius scan --output audit      # writes audit/blastradius-report.{md,json}
 blastradius scan --json              # JSON only
-blastradius report                   # convenience alias for `scan --report`
 ```
 
 ### Worktree comparison (the "a worktree is not a boundary" demo)
@@ -66,7 +66,10 @@ blastradius dashboard --ai            # + AI attack-scenario narratives
 ```
 
 A local web page (value-free, swept; UI assets and webfonts load from a CDN) with
-a radial blast-radius map, severity tiles, and the full inventory.
+a scroll-driven blast-radius map, severity tiles, and the full inventory. **It
+always also runs the §24 retro-hazard scan over every agent transcript on disk**
+(Claude Code, Codex, Cursor, …, across all time) and renders what "already
+happened and still matters" — value-free, no network beyond the standard probes.
 
 | Flag | Default | Meaning |
 |---|---|---|
@@ -77,10 +80,12 @@ a radial blast-radius map, severity tiles, and the full inventory.
 | `--model <M>` | `gpt-4o-mini` | OpenAI model for `--ai` (or set `OPENAI_MODEL`). |
 
 > ⚠ **Security:** the dashboard has **no authentication** and renders your full
-> reachable-credential inventory, escalation paths, and post-root blast radius.
-> The default `--bind 0.0.0.0` exposes that to anyone on your network — fine for
-> demoing from a trusted machine, risky on shared/conference WiFi. Use
-> `--bind 127.0.0.1` to restrict it to this machine. A loud warning prints
+> reachable-credential inventory, escalation paths, post-root blast radius, and
+> (by default) which still-reachable credentials your agents already read — a
+> precise targeting map. The default `--bind 0.0.0.0` exposes that to anyone on
+> your network — fine for demoing from a trusted machine, risky on
+> shared/conference WiFi. Use `--bind 127.0.0.1` to restrict it to this machine.
+> A loud warning prints
 > whenever the bind is non-loopback.
 
 Stop the server with Ctrl-C.
@@ -109,18 +114,19 @@ blastradius dashboard --ai
 The key is used only as the bearer token — it is never logged, printed, or
 written into any report or the dashboard.
 
-## 6. Useful flags (scan)
+## 6. Flags
 
-These are `scan`-only (`compare` rejects them). The scan's network checks (egress
-+ cloud-metadata reachability) always run and are not configurable.
+The tool always runs at full power — home-wide sibling search, broad env-name
+heuristics, key NAMES listed, and the egress + cloud-metadata network probes — so
+there are no flags to narrow, scope, or disable any of that. What remains:
 
-| Flag | Meaning |
-|---|---|
-| `--verbose` | List env/.env key NAMES (never values). |
-| `--env-broad` | Opt-in heuristic env-name matching (reported at most `Notable`). |
-| `--home-wide` | Also search all of `$HOME` for sibling repos. |
-| `--max-depth N` / `--max-repos N` | Traversal limits. |
-| `--fail-on <severity>` | Exit non-zero if any finding meets `info`/`notable`/`exposed` (CI gate). |
+| Command | Flag | Meaning |
+|---|---|---|
+| `scan` | `--report` / `--json` / `--markdown` / `--output <dir>` | Write reports. |
+| `scan` | `--fail-on <severity>` | Exit non-zero if any finding meets `info`/`notable`/`exposed` (CI gate). |
+| `compare` | `--report` / `--json` / `--markdown` / `--output <dir>` | Write reports. |
+| `dashboard` | `--port` / `--bind` / `--no-open` / `--ai` / `--model` | See §4–§5. |
+| `audit-history` | `--baseline <file>` / `--fail-on-score <N>` / `--quiet` / `--report` / `--json` / `--markdown` / `--output` | Retro-hazard scan; CI gate on realized score. |
 
 ## 7. Exit codes
 
