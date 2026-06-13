@@ -117,13 +117,14 @@ pub const PAGE: &str = r##"<!DOCTYPE html>
   /* ---- RadiusScene chip marquee (vertical auto-scroll, overflow-gated) ----
      Applies to every ring; only the .is-scrolling state (set by JS when the
      chip set overflows the height budget) animates or masks. */
-  .chip-marquee { position: relative; max-height: clamp(180px, 30vh, 300px); overflow: hidden; }
+  .chip-marquee { position: relative; max-height: clamp(240px, 52vh, 520px); overflow: hidden; }
   .chip-marquee.is-scrolling {
     -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 16px, #000 calc(100% - 24px), transparent 100%);
             mask-image: linear-gradient(to bottom, transparent 0, #000 16px, #000 calc(100% - 24px), transparent 100%);
   }
   .chip-marquee__track { display: flex; flex-direction: column; gap: 8px; }
-  .chip-marquee__set   { display: flex; flex-wrap: wrap; gap: 8px; }
+  .chip-marquee__set   { display: flex; flex-direction: column; gap: 8px; }
+  .chip-marquee.is-scrolling:hover { overflow-y: auto; }
   .chip-marquee.is-scrolling .chip-marquee__track {
     animation: chipCrawl 24s linear infinite;   /* duration overridden inline per-ring */
   }
@@ -264,9 +265,16 @@ pub const PAGE: &str = r##"<!DOCTYPE html>
   }
 
   // ---- LIVE per-ring overlay (the live denominator) ----------------------
+  // The canonical RINGS literal is now ONLY a layout / combo-node namespace
+  // (ids + titles + severities the constellation needs). Its old metric/detail
+  // were fake placeholders ("~/code/api", "23 readable", etc.) — blank them so
+  // no placeholder data can ever render. Every real number, path, and why/how
+  // comes from the live scan (LIVE_RINGS / FINDINGS / build_data).
+  RINGS.forEach((r) => r.findings.forEach((f) => { f.metric = ""; f.detail = []; }));
+
   // Map each live finding's `severity` value to the `sev` field the viz expects,
-  // and its `metric` (summary). Falls back to the canonical RINGS literal when
-  // no live rings are present so every fixture node id always resolves.
+  // and its `metric` (summary). Falls back to the (now placeholder-free) canonical
+  // RINGS literal when no live rings are present so every node id still resolves.
   const LIVE_RINGS = (D.rings && D.rings.length)
     ? D.rings.map((r) => ({
         id: r.id, n: r.n, label: r.label, blurb: r.blurb,
@@ -972,24 +980,40 @@ function ChipMarquee({ findings }) {
       const sh = set.scrollHeight;
       const ov = sh > box.clientHeight + 2;
       setOver(ov);
-      if (ov) setDur(Math.min(40, Math.max(14, sh / 22))); // ~22px/sec, clamped
+      if (ov) setDur(Math.min(90, Math.max(24, sh / 12))); // ~12px/sec (readable), clamped
     };
     measure();
     const ro = new ResizeObserver(measure);
     ro.observe(box);
     return () => ro.disconnect();
   }, [findings]);
-  const Chip = (f) => (
-    <span key={f.id} className="mono" style={{ fontSize: 12, padding: "5px 10px", borderRadius: 7,
-      border: `1px solid ${SEV_COLOR[f.sev]}`, color: SEV_COLOR[f.sev], background: "rgba(255,255,255,0.02)" }}>
-      {f.title} · {f.metric}
-    </span>
-  );
+  // Each finding is a readable card: title · metric, then the authored WHY and
+  // WHAT-AN-AGENT-CAN-DO text (never the old generic "title · metric" chip).
+  const Card = (f) => {
+    const col = SEV_COLOR[f.sev];
+    return (
+      <div key={f.id} style={{ borderLeft: `2px solid ${col}`, borderRadius: 7,
+        background: "rgba(255,255,255,0.02)", padding: "10px 13px", maxWidth: 460 }}>
+        <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
+          <span style={{ fontSize: 13.5, fontWeight: 600, color: col }}>{f.title}</span>
+          <span className="mono" style={{ fontSize: 11.5, color: "var(--txt-dim)" }}>{f.metric}</span>
+        </div>
+        {f.why && <div style={{ fontSize: 12.5, color: "var(--txt-mid)", lineHeight: 1.5, marginTop: 6 }}>{f.why}</div>}
+        {f.how && (
+          <div style={{ fontSize: 12.5, color: "var(--txt)", lineHeight: 1.5, marginTop: 6 }}>
+            <span className="mono" style={{ color: col, fontSize: 10, letterSpacing: 1, marginRight: 6 }}>AGENT CAN</span>
+            {f.how}
+          </div>
+        )}
+      </div>
+    );
+  };
   return (
-    <div ref={boxRef} className={"chip-marquee" + (over ? " is-scrolling" : "")} style={{ marginTop: 22 }}>
+    <div ref={boxRef} className={"chip-marquee" + (over ? " is-scrolling" : "")}
+      style={{ marginTop: 22, pointerEvents: "auto" }}>
       <div className="chip-marquee__track" style={over ? { animationDuration: dur + "s" } : undefined}>
-        <div className="chip-marquee__set" ref={setRef}>{findings.map(Chip)}</div>
-        {over && <div className="chip-marquee__set" aria-hidden="true">{findings.map(Chip)}</div>}
+        <div className="chip-marquee__set" ref={setRef}>{findings.map(Card)}</div>
+        {over && <div className="chip-marquee__set" aria-hidden="true">{findings.map(Card)}</div>}
       </div>
     </div>
   );
@@ -1046,7 +1070,7 @@ function CalmScene() {
           <div style={{ border: "1px solid rgba(46,230,166,.4)", borderRadius: 16, padding: "30px 26px",
             background: "linear-gradient(180deg, rgba(46,230,166,.05), transparent)", boxShadow: "var(--glow-safe)" }}>
             <div className="mono" style={{ fontSize: 13, color: "var(--txt-mid)", textAlign: "left", lineHeight: 1.9 }}>
-              <div style={{ color: "var(--safe)" }}>~/code/app/.worktrees/task-481</div>
+              <div style={{ color: "var(--safe)" }}>&lt;your-project&gt;/.worktrees/&lt;task&gt;</div>
               <div>├─ src/</div>
               <div>├─ package.json</div>
               <div>└─ <span style={{ color: "var(--txt)" }}>agent</span> <span style={{ color: "var(--txt-dim)" }}>// scoped to this folder, right?</span></div>
@@ -1086,7 +1110,7 @@ const RING_COPY = [
   { k: "shell",     t: "The shell it was handed", d: "Secret-named env vars, .env keys, shell history — already loaded before the first prompt." },
   { k: "identity",  t: "Your identity",            d: "SSH private keys, a live ssh-agent, GitHub auth, the git credential store. The keys that say you are you." },
   { k: "cloud",     t: "Your cloud",               d: "AWS profiles mounted into the shell. Provider identity, no extra step required." },
-  { k: "neighbors", t: "Every neighboring repo",   d: "23 sibling repos on disk — 7 of them carrying their own secrets. The task was one folder; the reach is the whole workspace." },
+  { k: "neighbors", t: "Every neighboring repo",   d: "Sibling repos sit on disk right next to the task — some carrying their own secrets. The task was one folder; the reach is the whole workspace." },
   { k: "network",   t: "The open network",         d: "Outbound egress works. A push is likely to be accepted. Data has somewhere to go; code has somewhere to land." },
   { k: "host",      t: "The whole machine",        d: "Docker group to root. Process memory. Browser sessions. Past the repo, past the cloud — the box itself." },
 ];

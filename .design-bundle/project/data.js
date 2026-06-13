@@ -113,9 +113,16 @@
   }
 
   // ---- LIVE per-ring overlay (the live denominator) ----------------------
+  // The canonical RINGS literal is now ONLY a layout / combo-node namespace
+  // (ids + titles + severities the constellation needs). Its old metric/detail
+  // were fake placeholders ("~/code/api", "23 readable", etc.) — blank them so
+  // no placeholder data can ever render. Every real number, path, and why/how
+  // comes from the live scan (LIVE_RINGS / FINDINGS / build_data).
+  RINGS.forEach((r) => r.findings.forEach((f) => { f.metric = ""; f.detail = []; }));
+
   // Map each live finding's `severity` value to the `sev` field the viz expects,
-  // and its `metric` (summary). Falls back to the canonical RINGS literal when
-  // no live rings are present so every fixture node id always resolves.
+  // and its `metric` (summary). Falls back to the (now placeholder-free) canonical
+  // RINGS literal when no live rings are present so every node id still resolves.
   const LIVE_RINGS = (D.rings && D.rings.length)
     ? D.rings.map((r) => ({
         id: r.id, n: r.n, label: r.label, blurb: r.blurb,

@@ -103,13 +103,14 @@
   /* ---- RadiusScene chip marquee (vertical auto-scroll, overflow-gated) ----
      Applies to every ring; only the .is-scrolling state (set by JS when the
      chip set overflows the height budget) animates or masks. */
-  .chip-marquee { position: relative; max-height: clamp(180px, 30vh, 300px); overflow: hidden; }
+  .chip-marquee { position: relative; max-height: clamp(240px, 52vh, 520px); overflow: hidden; }
   .chip-marquee.is-scrolling {
     -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 16px, #000 calc(100% - 24px), transparent 100%);
             mask-image: linear-gradient(to bottom, transparent 0, #000 16px, #000 calc(100% - 24px), transparent 100%);
   }
   .chip-marquee__track { display: flex; flex-direction: column; gap: 8px; }
-  .chip-marquee__set   { display: flex; flex-wrap: wrap; gap: 8px; }
+  .chip-marquee__set   { display: flex; flex-direction: column; gap: 8px; }
+  .chip-marquee.is-scrolling:hover { overflow-y: auto; }
   .chip-marquee.is-scrolling .chip-marquee__track {
     animation: chipCrawl 24s linear infinite;   /* duration overridden inline per-ring */
   }
