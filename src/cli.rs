@@ -2,30 +2,11 @@
 
 use clap::{Args, Parser, Subcommand};
 
-use crate::util::net::validate_host_port_target;
-
-const EGRESS_HELP: &str = "\
-Network egress probe:
-  By default, blastradius checks outbound reachability by resolving a
-  well-known hostname and opening a single TLS connection to a major,
-  always-available anycast endpoint (default: 1.1.1.1:443). No HTTP body
-  and no findings, credentials, paths, env vars, repo names, hostnames,
-  usernames, or machine identifiers are sent.
-
-  It reports whether DNS resolution and the TLS handshake succeeded, the
-  resolved IP, and latency.
-
-  Any outbound connection necessarily exposes your source IP and a timestamp
-  to the destination. Override with --egress-url HOST:PORT (schemes,
-  credentials, paths, and port 0 are rejected); disable with --no-egress or
-  --offline.";
-
 #[derive(Parser, Debug)]
 #[command(
     name = "blastradius",
     version,
     about = "Local reachability audit for coding-agent environments",
-    long_about = EGRESS_HELP,
 )]
 pub struct Cli {
     #[command(subcommand)]
@@ -70,22 +51,12 @@ pub struct DashboardArgs {
     /// OpenAI model for `--ai` (or set OPENAI_MODEL).
     #[arg(long, value_name = "MODEL")]
     pub model: Option<String>,
-    /// Run the scan fully offline (implies --no-egress; disables --ai).
-    #[arg(long)]
-    pub offline: bool,
-    /// Disable the egress reachability probe during the scan.
-    #[arg(long)]
-    pub no_egress: bool,
     /// Additionally search all of $HOME for sibling repos.
     #[arg(long)]
     pub home_wide: bool,
-    /// Also probe cloud-metadata reachability (a second outbound connection).
-    #[arg(long)]
-    pub check_metadata: bool,
 }
 
 #[derive(Args, Debug, Clone, Default)]
-#[command(after_help = EGRESS_HELP, after_long_help = EGRESS_HELP)]
 pub struct ScanArgs {
     /// Write both Markdown and JSON reports to ./ (or --output dir).
     #[arg(long)]
@@ -99,12 +70,6 @@ pub struct ScanArgs {
     /// Directory to write reports into (created if needed).
     #[arg(long, value_name = "DIR")]
     pub output: Option<String>,
-    /// Disable the egress reachability probe.
-    #[arg(long)]
-    pub no_egress: bool,
-    /// Run fully offline (implies --no-egress).
-    #[arg(long)]
-    pub offline: bool,
     /// Max traversal depth for home/sibling roots.
     #[arg(long, value_name = "N")]
     pub max_depth: Option<usize>,
@@ -120,12 +85,6 @@ pub struct ScanArgs {
     /// Enable broad heuristic env-name matching (reported at most Notable).
     #[arg(long)]
     pub env_broad: bool,
-    /// Override the egress target (host:port).
-    #[arg(long, value_name = "HOST:PORT", value_parser = validate_host_port_target)]
-    pub egress_url: Option<String>,
-    /// Also probe cloud-metadata reachability (a second outbound connection).
-    #[arg(long)]
-    pub check_metadata: bool,
     /// Exit nonzero if any finding meets this severity (info|notable|exposed).
     #[arg(long, value_name = "SEVERITY", value_parser = ["info", "notable", "exposed"])]
     pub fail_on: Option<String>,
@@ -147,34 +106,9 @@ mod tests {
         assert!(Cli::try_parse_from(["blastradius", "compare", "--json"]).is_ok());
         assert!(Cli::try_parse_from(["blastradius", "compare", "--markdown"]).is_ok());
     }
-
-    #[test]
-    fn egress_url_accepts_host_port_only() {
-        assert!(
-            Cli::try_parse_from(["blastradius", "scan", "--egress-url", "example.com:443"]).is_ok()
-        );
-        assert!(
-            Cli::try_parse_from(["blastradius", "compare", "--egress-url", "[::1]:443"]).is_ok()
-        );
-
-        for target in [
-            "https://example.com:443",
-            "user:pass@example.com:443",
-            "example.com:443/path",
-            "example.com",
-            "example.com:0",
-            "::1:443",
-        ] {
-            assert!(
-                Cli::try_parse_from(["blastradius", "scan", "--egress-url", target]).is_err(),
-                "{target}"
-            );
-        }
-    }
 }
 
 #[derive(Args, Debug, Clone, Default)]
-#[command(after_help = EGRESS_HELP, after_long_help = EGRESS_HELP)]
 pub struct CompareArgs {
     /// Write both Markdown and JSON reports.
     #[arg(long)]
@@ -185,22 +119,10 @@ pub struct CompareArgs {
     /// Write a Markdown report.
     #[arg(long)]
     pub markdown: bool,
-    /// Disable the egress reachability probe.
-    #[arg(long)]
-    pub no_egress: bool,
-    /// Run fully offline (implies --no-egress).
-    #[arg(long)]
-    pub offline: bool,
     /// Keep the temporary worktree if an error occurs (for debugging).
     #[arg(long)]
     pub keep_worktree_on_error: bool,
     /// Directory to write reports into.
     #[arg(long, value_name = "DIR")]
     pub output: Option<String>,
-    /// Override the egress target (host:port).
-    #[arg(long, value_name = "HOST:PORT", value_parser = validate_host_port_target)]
-    pub egress_url: Option<String>,
-    /// Also probe cloud-metadata reachability (a second outbound connection).
-    #[arg(long)]
-    pub check_metadata: bool,
 }

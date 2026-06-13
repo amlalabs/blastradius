@@ -142,7 +142,7 @@ impl Probe for DotenvProbe {
             },
         });
         // --verbose lists KEY NAMES only (never values).
-        if ctx.network.verbose {
+        if ctx.options.verbose {
             let names: Vec<&String> = current.key_names.iter().collect();
             evidence["current_repo"]["key_names"] = json!(names);
         }

@@ -3,8 +3,9 @@
 `blastradius` is a local, read-only reachability audit: it shows what a coding
 agent running as you can reach on this machine (credentials, identities, repos,
 egress, escalation paths), and — optionally — narrates the attack scenarios that
-reachable set enables. Nothing leaves your machine except the documented egress
-probe and the opt-in `--ai` call.
+reachable set enables. No findings or secret values leave your machine; the only
+outbound connections are the documented egress probe, the opt-in `--ai` call, and
+the dashboard page's CDN/webfont asset loads (which carry no scan data).
 
 ## 1. Prerequisites
 
@@ -35,7 +36,6 @@ install -m755 target/release/blastradius ~/.local/bin/blastradius
 ```sh
 blastradius                  # default command == `scan`
 blastradius scan             # the reachability battery, printed to the terminal
-blastradius scan --offline   # no network at all (skips the egress probe)
 blastradius scan --verbose   # also list env/.env key NAMES (never values)
 ```
 
@@ -65,8 +65,8 @@ blastradius dashboard                 # serve the dashboard, auto-open browser
 blastradius dashboard --ai            # + AI attack-scenario narratives
 ```
 
-A single self-contained page (no external assets, works offline) with a radial
-blast-radius map, severity tiles, and the full inventory.
+A local web page (value-free, swept; UI assets and webfonts load from a CDN) with
+a radial blast-radius map, severity tiles, and the full inventory.
 
 | Flag | Default | Meaning |
 |---|---|---|
@@ -75,7 +75,6 @@ blast-radius map, severity tiles, and the full inventory.
 | `--no-open` | off | Don't auto-open the browser. |
 | `--ai` | off | Generate attack scenarios via OpenAI (see §5). |
 | `--model <M>` | `gpt-4o-mini` | OpenAI model for `--ai` (or set `OPENAI_MODEL`). |
-| `--offline` | off | Scan with no network; also disables `--ai`. |
 
 > ⚠ **Security:** the dashboard has **no authentication** and renders your full
 > reachable-credential inventory, escalation paths, and post-root blast radius.
@@ -88,7 +87,7 @@ Stop the server with Ctrl-C.
 
 ## 5. AI attack scenarios (`--ai`)
 
-`--ai` is the **only** feature that sends anything off-machine, and it is opt-in.
+`--ai` is the **only** feature that sends scan data off-machine, and it is opt-in.
 It transmits ONLY the value-free finding inventory (ids, classes, severities,
 titles, summaries — the same metadata the local report prints) to the OpenAI
 API, re-checks the payload for secret shapes before sending, and renders
@@ -110,14 +109,13 @@ blastradius dashboard --ai
 The key is used only as the bearer token — it is never logged, printed, or
 written into any report or the dashboard.
 
-## 6. Useful flags (scan & compare)
+## 6. Useful flags (scan)
+
+These are `scan`-only (`compare` rejects them). The scan's network checks (egress
++ cloud-metadata reachability) always run and are not configurable.
 
 | Flag | Meaning |
 |---|---|
-| `--offline` | No network at all (implies `--no-egress`). |
-| `--no-egress` | Skip the outbound egress probe only. |
-| `--egress-url HOST:PORT` | Override the egress target (redacted in reports). |
-| `--check-metadata` | Also probe cloud-metadata (169.254.169.254) reachability — a second outbound connection. |
 | `--verbose` | List env/.env key NAMES (never values). |
 | `--env-broad` | Opt-in heuristic env-name matching (reported at most `Notable`). |
 | `--home-wide` | Also search all of `$HOME` for sibling repos. |
@@ -137,14 +135,13 @@ written into any report or the dashboard.
 Example CI gate:
 
 ```sh
-blastradius scan --offline --fail-on exposed
+blastradius scan --fail-on exposed
 ```
 
 ## 8. Verify / develop
 
 ```sh
 cargo test                          # unit + fixture + worktree tests
-cargo test --features network-tests # also exercise the real egress probe
 blastradius self-test-redaction     # assert no synthetic secret leaks any renderer
 cargo run -- compare                # iterate locally
 ```
@@ -153,7 +150,9 @@ cargo run -- compare                # iterate locally
 
 - No telemetry; no secret values in output; no exploit behavior; no repo secret
   scanning.
-- No network except the documented egress probe and the opt-in `--ai` call.
+- No findings or secret values leave the machine; outbound connections are the
+  documented egress probe, the opt-in `--ai` call, and the dashboard page's
+  CDN/webfont asset loads (no scan data).
 - Never writes to repo files, shell/git config, credential stores, or `$HOME` by
   default.
 - Never attempts privilege escalation or reads root-owned file contents — the

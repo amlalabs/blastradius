@@ -82,7 +82,7 @@ impl Probe for EnvProbe {
             }
             if CURATED.contains(&key) {
                 curated_hits.push(json!({ "key": key, "value_len": var.value_len }));
-            } else if ctx.network.env_broad && broad_re().is_match(key) {
+            } else if ctx.options.env_broad && broad_re().is_match(key) {
                 broad_hits.push(json!({ "key": key, "value_len": var.value_len }));
             }
         }

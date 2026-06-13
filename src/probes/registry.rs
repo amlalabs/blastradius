@@ -53,7 +53,7 @@ fn bespoke_probes() -> Vec<Box<dyn Probe>> {
         // ---- Git write ----
         Box::new(probes::git_write::GitWriteProbe),
         Box::new(probes::git_config::GitConfigProbe),
-        // ---- Egress ----
+        // ---- Egress (always on, no configuration) ----
         Box::new(probes::egress::EgressProbe),
         Box::new(probes::egress_mediation::EgressMediationProbe),
         // ---- Process ----

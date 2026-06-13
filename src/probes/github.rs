@@ -1,5 +1,6 @@
-//! §12.3 — GitHub token source, OFFLINE by default. Reads local gh hosts.yml.
-//! Never calls GitHub or `gh auth status`. Scopes require network → not checked.
+//! §12.3 — GitHub token source. Reads the local gh hosts.yml only; never calls
+//! GitHub or `gh auth status`, so token scopes (which would require an API call)
+//! are not enumerated. This probe does no network I/O of its own.
 
 use serde_json::json;
 use std::path::PathBuf;
@@ -116,7 +117,7 @@ impl Probe for GithubProbe {
         };
 
         let summary = if any_token {
-            "GitHub token source present; scopes not checked in offline mode".to_string()
+            "GitHub token source present; scopes not verified (local token introspection only)".to_string()
         } else if !skipped_files.is_empty() {
             "GitHub CLI host config present; one or more files were not parsed".to_string()
         } else {

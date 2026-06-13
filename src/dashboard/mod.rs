@@ -1,9 +1,21 @@
 //! Local web dashboard (`blastradius dashboard`).
 //!
 //! Runs a scan, optionally generates an AI blast-radius analysis, and serves a
-//! single self-contained page on `127.0.0.1` — no external assets, no telemetry.
-//! The page data is the value-free finding inventory; it is swept through the
-//! Layer-2 redaction pass before it is ever written to a socket.
+//! cinematic "blast radius" storytelling page. It binds `0.0.0.0:5321` by
+//! default (network-reachable, no auth — a loud warning prints on any
+//! non-loopback bind; pass `--bind 127.0.0.1` for loopback-only). The page loads
+//! its UI runtime (React/Babel) and webfonts from a CDN for rendering — those
+//! requests carry no scan data. The data the page shows is the value-free
+//! finding inventory; it is embedded inline and swept through the Layer-2
+//! redaction pass before it is ever written to a socket, so secret values never
+//! leave the machine (§4.2).
+//!
+//! What is live vs. illustrative: the live scan drives the reachable-surface
+//! tallies, the per-ring finding chips in the expanding-radius section, and the
+//! full inventory. The radius/constellation node *geometry* uses a fixed
+//! illustrative layout, and the per-session scoring + retro-hazard sections
+//! (§23/§24) are *illustrative post-MVP fixtures* baked into the page (the
+//! engine is not built) — all clearly labeled as such on the page.
 
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
@@ -28,6 +40,92 @@ pub struct ServeOptions {
     pub analysis: Result<Option<Analysis>, String>,
 }
 
+/// The six radius rings, in FIXED outward order. The page lays them out by this
+/// order; live data only fills in per-ring findings (the denominator).
+const RING_ORDER: [&str; 6] = ["shell", "identity", "cloud", "neighbors", "network", "host"];
+
+/// Sub-classify a reachable `Credentials` finding into a ring by its id (§ ring map).
+fn cred_ring(id: &str) -> &'static str {
+    const CLOUD_PREFIXES: [&str; 17] = [
+        "aws.",
+        "gcp.",
+        "azure.",
+        "kube.",
+        "docker.",
+        "container.",
+        "databricks.",
+        "dbt.",
+        "snowflake.",
+        "terraform.",
+        "app.terraform.io",
+        "conda.",
+        "cloudflared.",
+        "rclone.",
+        "vault.",
+        "cloud_init.",
+        "cloud_legacy.",
+    ];
+    if CLOUD_PREFIXES.iter().any(|p| id.starts_with(p)) {
+        return "cloud";
+    }
+    const SHELL_IDS: [&str; 4] = [
+        "env.secret_names",
+        "env.subprocess_scrub",
+        "credentials.shell_history",
+        "credentials.repl_history",
+    ];
+    if SHELL_IDS.contains(&id) || id.starts_with("cross_repo.dotenv") || id.starts_with("atuin.") {
+        return "shell";
+    }
+    "identity"
+}
+
+/// Map a reachable finding to its ring id. EXHAUSTIVE over scope (first) then class.
+fn ring_of(f: &crate::finding::Finding) -> &'static str {
+    use crate::finding::{FindingClass, FindingScope};
+    // Scope takes precedence for the cross-machine rings.
+    match f.scope {
+        FindingScope::SiblingRepos => return "neighbors",
+        FindingScope::Network => return "network",
+        FindingScope::Host => return "host",
+        FindingScope::Ambient | FindingScope::CurrentRepo => {}
+    }
+    match f.class {
+        FindingClass::CrossRepo => "neighbors",
+        FindingClass::GitWrite => "network",
+        FindingClass::Egress => {
+            if f.id == "egress.mediation" {
+                "cloud"
+            } else {
+                "network"
+            }
+        }
+        FindingClass::Process => "host",
+        FindingClass::HostPersistence => "host",
+        FindingClass::SystemInfo => "host",
+        FindingClass::Credentials => cred_ring(&f.id),
+    }
+}
+
+/// Design copy (label, blurb) for each ring id.
+fn ring_meta(id: &str) -> (&'static str, &'static str) {
+    match id {
+        "shell" => ("This shell", "The environment the agent was handed."),
+        "identity" => ("Your identity", "The keys and tokens that say you are you."),
+        "cloud" => ("The cloud", "Provider identities mounted into your shell."),
+        "neighbors" => (
+            "Neighboring repos",
+            "Everything else sitting next to the task on disk.",
+        ),
+        "network" => (
+            "The network",
+            "Where data could go, and where code could land.",
+        ),
+        "host" => ("The whole machine", "Beyond the task: the box itself."),
+        _ => ("", ""),
+    }
+}
+
 /// Build the value-free dashboard JSON from a report (+ optional AI analysis).
 pub fn build_data(report: &RunReport, analysis: &Result<Option<Analysis>, String>) -> Value {
     // The dashboard reflects the first (primary) context.
@@ -38,6 +136,10 @@ pub fn build_data(report: &RunReport, analysis: &Result<Option<Analysis>, String
     let mut findings_json: Vec<Value> = Vec::new();
     let mut classes: Vec<(crate::finding::FindingClass, usize, usize)> = Vec::new();
     let (mut exposed, mut notable) = (0usize, 0usize);
+
+    // Live-radius accumulator (the reachable-surface denominator nodes).
+    let mut ring_findings: std::collections::HashMap<&'static str, Vec<Value>> =
+        std::collections::HashMap::new();
 
     if let Some(cr) = cr {
         for f in &cr.findings {
@@ -67,6 +169,16 @@ pub fn build_data(report: &RunReport, analysis: &Result<Option<Analysis>, String
                         usize::from(matches!(f.severity, crate::severity::Severity::Exposed)),
                     ));
                 }
+
+                // Live radius: value-free per-ring node (paths/scope/labels only).
+                let detail = format!("{} · {}", f.confidence.label(), f.scope);
+                ring_findings.entry(ring_of(f)).or_default().push(json!({
+                    "id": f.id,
+                    "title": f.title,
+                    "severity": f.severity.label(),
+                    "metric": f.summary,
+                    "detail": [detail],
+                }));
             }
             findings_json.push(json!({
                 "id": f.id,
@@ -90,6 +202,22 @@ pub fn build_data(report: &RunReport, analysis: &Result<Option<Analysis>, String
         })
         .collect();
 
+    // Emit the six rings in FIXED outward order; empty rings carry n:0.
+    let rings: Vec<Value> = RING_ORDER
+        .iter()
+        .map(|&id| {
+            let (label, blurb) = ring_meta(id);
+            let findings = ring_findings.remove(id).unwrap_or_default();
+            json!({
+                "id": id,
+                "label": label,
+                "blurb": blurb,
+                "n": findings.len(),
+                "findings": findings,
+            })
+        })
+        .collect();
+
     let ai = match analysis {
         Ok(Some(a)) => json!({
             "enabled": true,
@@ -107,14 +235,26 @@ pub fn build_data(report: &RunReport, analysis: &Result<Option<Analysis>, String
         "generated": report.timestamp,
         "platform": platform,
         "verdict": verdict,
-        "stats": { "exposed": exposed, "notable": notable, "classes": class_tiles },
+        "stats": {
+            "exposed": exposed,
+            "notable": notable,
+            "total": findings_json.len(),
+            "classes": class_tiles,
+            // Documented capability breadth (§23.1/§23.15): the tool runs
+            // ~35 probes across ~30 credential stores. This is a tool-breadth
+            // figure for the constellation caption, not a per-scan finding count.
+            // Orientation must match the page fallback (probes >= stores) so the
+            // "~N probes · ~M credential stores" caption stays coherent.
+            "breadth": { "probes": 35, "stores": 30 },
+        },
+        "rings": rings,
         "findings": findings_json,
         "ai": ai,
     })
 }
 
 /// Render the full HTML page with the data embedded, swept for secret shapes.
-fn render_html(data: &Value) -> String {
+pub(crate) fn render_html(data: &Value) -> String {
     let data_str = serde_json::to_string(data).unwrap_or_else(|_| "{}".to_string());
     // Guard against `</script>` breaking out of the embedded JSON block.
     let data_str = data_str.replace("</", "<\\/");
@@ -139,7 +279,7 @@ pub fn serve(report: &RunReport, opts: ServeOptions) -> Result<()> {
 
     if loopback {
         println!("\n  ▸ blastradius dashboard live at {url}");
-        println!("    (local only · value-free · Ctrl-C to stop)\n");
+        println!("    (findings stay local · value-free · UI assets via CDN · Ctrl-C to stop)\n");
     } else {
         println!("\n  ▸ blastradius dashboard live at http://{}:{port} (and {url} locally)", opts.bind);
         eprintln!(
@@ -237,23 +377,17 @@ fn open_browser(url: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::context::{Context, ContextLabel, NetworkPolicy, ScanLimits};
+    use crate::context::{Context, ContextLabel, ScanLimits, ScanOptions};
 
     fn dummy_report() -> RunReport {
         let ctx = Context::build(
             ContextLabel::Cwd,
             std::env::temp_dir(),
             ScanLimits::default(),
-            NetworkPolicy {
-                egress_enabled: false,
-                offline: true,
-                ..NetworkPolicy::default()
-            },
+            ScanOptions::default(),
         );
         RunReport {
             mode: "dashboard".into(),
-            offline: true,
-            egress_enabled: false,
             timestamp: "2026-06-12T00:00:00Z".into(),
             version: "test".into(),
             platform: ctx.platform,
@@ -291,5 +425,145 @@ mod tests {
         let data = build_data(&report, &Ok(None));
         assert_eq!(data["stats"]["exposed"], 1);
         assert_eq!(data["stats"]["classes"][0]["label"], "CREDENTIALS");
+    }
+
+    #[test]
+    fn build_data_emits_six_rings() {
+        let report = dummy_report();
+        let data = build_data(&report, &Ok(None));
+        let rings = data["rings"].as_array().expect("rings is an array");
+        assert_eq!(rings.len(), 6, "exactly six rings");
+        let ids: Vec<&str> = rings.iter().map(|r| r["id"].as_str().unwrap()).collect();
+        assert_eq!(
+            ids,
+            ["shell", "identity", "cloud", "neighbors", "network", "host"],
+            "rings in fixed outward order"
+        );
+        // The dummy aws.credentials.profiles (Exposed/Credentials) lands in cloud.
+        let cloud = rings.iter().find(|r| r["id"] == "cloud").unwrap();
+        let titles: Vec<&str> = cloud["findings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|f| f["id"].as_str().unwrap())
+            .collect();
+        assert!(
+            titles.contains(&"aws.credentials.profiles"),
+            "aws creds land in cloud ring, got {titles:?}"
+        );
+    }
+
+    #[test]
+    fn ring_of_unit() {
+        use crate::finding::{Finding, FindingClass, FindingScope};
+        use crate::severity::{Confidence, Severity};
+        let mk = |id: &str, class, scope| {
+            Finding::new(id, class, scope, "t", Severity::Exposed, Confidence::Confirmed)
+        };
+        assert_eq!(
+            ring_of(&mk(
+                "ssh.private_keys",
+                FindingClass::Credentials,
+                FindingScope::Ambient
+            )),
+            "identity"
+        );
+        assert_eq!(
+            ring_of(&mk(
+                "env.secret_names",
+                FindingClass::Credentials,
+                FindingScope::Ambient
+            )),
+            "shell"
+        );
+        assert_eq!(
+            ring_of(&mk(
+                "aws.credentials.profiles",
+                FindingClass::Credentials,
+                FindingScope::Ambient
+            )),
+            "cloud"
+        );
+        assert_eq!(
+            ring_of(&mk(
+                "git.push_likelihood",
+                FindingClass::GitWrite,
+                FindingScope::CurrentRepo
+            )),
+            "network"
+        );
+        assert_eq!(
+            ring_of(&mk(
+                "cross_repo.sibling_repos",
+                FindingClass::CrossRepo,
+                FindingScope::SiblingRepos
+            )),
+            "neighbors"
+        );
+        assert_eq!(
+            ring_of(&mk(
+                "host.privilege_escalation",
+                FindingClass::HostPersistence,
+                FindingScope::Host
+            )),
+            "host"
+        );
+        assert_eq!(
+            ring_of(&mk(
+                "egress.mediation",
+                FindingClass::Egress,
+                FindingScope::Ambient
+            )),
+            "cloud"
+        );
+        assert_eq!(
+            ring_of(&mk(
+                "egress.connectivity",
+                FindingClass::Egress,
+                FindingScope::Network
+            )),
+            "network"
+        );
+    }
+
+    #[test]
+    fn stats_breadth_present() {
+        let report = dummy_report();
+        let data = build_data(&report, &Ok(None));
+        assert!(
+            data["stats"]["breadth"]["probes"].is_u64(),
+            "breadth.probes is an integer"
+        );
+        assert!(
+            data["stats"]["breadth"]["stores"].is_u64(),
+            "breadth.stores is an integer"
+        );
+    }
+
+    #[test]
+    fn page_has_sections_and_is_swept() {
+        let data = build_data(&dummy_report(), &Ok(None));
+        let html = render_html(&data);
+        assert!(!crate::report::redaction::contains_secret_shaped(&html));
+        assert!(html.contains("illustrative — post-MVP, not from your scan"));
+        assert!(html.contains("REACHABILITY, NOT EXPLOITATION"));
+        assert!(html.contains("fonts.googleapis.com"));
+        assert!(html.contains("unpkg.com/react"));
+        assert!(html.contains("id=\"br-data\""));
+    }
+
+    #[test]
+    fn planted_canary_in_page_is_swept() {
+        const CANARY: &str = "ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ012345";
+        let mut data = build_data(&dummy_report(), &Ok(None));
+        // Inject a shaped canary into a Value field, then run the SAME path
+        // render_html uses: to_string → </ guard → marker replace → sweep.
+        data["canary"] = json!(CANARY);
+        let data_str = serde_json::to_string(&data).unwrap();
+        let data_str = data_str.replace("</", "<\\/");
+        let html = page::PAGE.replace("/*__BR_DATA__*/", &data_str);
+        let swept = crate::report::redaction::sweep(&html);
+        assert!(!swept.contains(CANARY), "raw canary must be swept out");
+        assert!(swept.contains("[REDACTED]"), "redaction marker must appear");
     }
 }

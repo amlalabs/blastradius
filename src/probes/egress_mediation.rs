@@ -10,9 +10,9 @@
 //!         IMDS-credential exposure surface.
 //!
 //! Proxy detection is pure env inspection (NAMES + redacted endpoint, never
-//! credentials). The metadata reachability check is a SECOND outbound
-//! connection, so it is OPT-IN (`--check-metadata`); by default this probe makes
-//! no network connection, honoring the "exactly one egress check" promise (§3).
+//! credentials). The metadata reachability check is a SECOND, fixed outbound TCP
+//! connect to the link-local IMDS address; like the rest of the scan it ALWAYS
+//! runs — there is no flag to disable it. No data is sent and no response read.
 
 use serde_json::json;
 use std::net::{TcpStream, ToSocketAddrs};
@@ -62,19 +62,13 @@ impl Probe for EgressMediationProbe {
         FindingClass::Egress
     }
 
-    fn run(&self, ctx: &Context) -> anyhow::Result<Vec<Finding>> {
+    fn run(&self, _ctx: &Context) -> anyhow::Result<Vec<Finding>> {
         let (proxy_set, proxy_entries) = proxy_info();
 
-        // Cloud-metadata reachability — opt-in, gated on egress being allowed.
-        let metadata_allowed =
-            ctx.network.check_metadata && ctx.network.egress_enabled && !ctx.network.offline;
-        let (metadata_checked, metadata_reachable, metadata_latency) = if metadata_allowed {
-            match metadata_connect() {
-                Some(ms) => (true, true, Some(ms)),
-                None => (true, false, None),
-            }
-        } else {
-            (false, false, None)
+        // Cloud-metadata reachability — always probed (a fixed TCP connect).
+        let (metadata_checked, metadata_reachable, metadata_latency) = match metadata_connect() {
+            Some(ms) => (true, true, Some(ms)),
+            None => (true, false, None),
         };
 
         let (severity, title, confidence) = if metadata_reachable {
@@ -126,11 +120,7 @@ impl Probe for EgressMediationProbe {
                 "reachable": metadata_reachable,
                 "latency_ms": metadata_latency,
                 "target": METADATA_TARGET,
-                "note": if metadata_checked {
-                    "TCP connect only; no request sent, no credentials retrieved."
-                } else {
-                    "not checked by default (would be a 2nd outbound connection); enable with --check-metadata."
-                },
+                "note": "TCP connect only; no request sent, no credentials retrieved.",
             },
         }))
         .remediation(&[

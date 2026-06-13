@@ -63,18 +63,15 @@ fn sandbox_detect_emits_verdict_and_namespaces() {
 }
 
 #[test]
-fn egress_mediation_skips_metadata_when_offline() {
+fn egress_mediation_always_checks_metadata() {
     let tmp = tempfile::tempdir().unwrap();
-    // common ctx is offline (egress disabled) and check_metadata defaults false.
     let ctx = ctx_with(tmp.path(), tmp.path());
     let findings = probes::egress_mediation::EgressMediationProbe
         .run(&ctx)
         .unwrap();
     let f = &findings[0];
     assert_eq!(f.id, "egress.mediation");
-    assert_eq!(
-        f.evidence["metadata"]["checked"], false,
-        "metadata must not be probed without --check-metadata"
-    );
+    // Metadata reachability is always probed now — there is no opt-in flag.
+    assert_eq!(f.evidence["metadata"]["checked"], true);
     assert!(!contains_secret_shaped(&ev(f)));
 }

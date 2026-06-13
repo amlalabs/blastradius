@@ -1,274 +1,1710 @@
-//! The self-contained dashboard page. `/*__BR_DATA__*/` is replaced with the
-//! value-free JSON inventory at serve time. No external assets — works offline.
+//! Cinematic blast-radius dashboard page (served by `blastradius dashboard`).
+//!
+//! GENERATED FILE — do not edit by hand. This is assembled from the design
+//! sources in `.design-bundle/project/` by `.design-bundle/gen_page.py`.
+//! Edit those sources (Blast Radius.html, data.js, viz/narrative/dashboard/
+//! retro/app.jsx) and re-run the generator instead.
+//!
+//! The page loads its UI runtime (React 18 + ReactDOM + Babel-standalone)
+//! and webfonts from a CDN; those requests carry no scan data. The live,
+//! value-free finding inventory is injected at the data marker in the
+//! #br-data script tag by `render_html`, and the whole document is run
+//! through the Layer-2 redaction sweep before any byte is written to a
+//! socket, so secret values never leave the machine.
 
-pub const PAGE: &str = r##"<!doctype html>
+pub const PAGE: &str = r##"<!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>blastradius — blast radius</title>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>blastradius — what your coding agent can reach</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css?family=Space+Grotesk:400,500,600,700|JetBrains+Mono:400,500,700&display=swap" rel="stylesheet">
 <style>
-  :root{
-    --bg:#0a0e14; --panel:#11161f; --panel2:#0d1219; --border:#1d2530;
-    --text:#cdd6e3; --muted:#6c7889; --dim:#454f5e;
-    --exposed:#ff4d57; --notable:#ffb020; --info:#3a4453;
-    --accent:#36c5f0; --good:#2ec27e;
-    --mono:ui-monospace,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace;
-    --sans:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+  :root {
+    /* situation-room palette */
+    --bg:        #07090d;
+    --bg-1:      #0b0e14;
+    --bg-2:      #11151e;
+    --surface:   #141925;
+    --surface-2: #1a2030;
+    --line:      rgba(255,255,255,0.08);
+    --line-2:    rgba(255,255,255,0.14);
+
+    --txt:       #eef2f8;
+    --txt-mid:   #9aa4b6;
+    --txt-dim:   #5c6678;
+
+    --hot:       #ff5b35;   /* blast / reach */
+    --hot-2:     #ff8a5c;
+    --crit:      #ff3d57;   /* critical */
+    --warn:      #f5a623;   /* notable */
+    --safe:      #2ee6a6;   /* contained */
+    --safe-deep: #14b888;
+    --info:      #5aa2ff;
+
+    --glow-hot:  0 0 0 1px rgba(255,91,53,.4), 0 0 24px rgba(255,91,53,.35);
+    --glow-safe: 0 0 0 1px rgba(46,230,166,.35), 0 0 20px rgba(46,230,166,.25);
+
+    --mono: 'JetBrains Mono', ui-monospace, monospace;
+    --sans: 'Space Grotesk', system-ui, sans-serif;
+
+    --ring1: 1100px;
   }
-  *{box-sizing:border-box}
-  body{margin:0;background:radial-gradient(1200px 600px at 50% -10%,#141b26 0,var(--bg) 60%);
-    color:var(--text);font-family:var(--sans);line-height:1.5;-webkit-font-smoothing:antialiased}
-  .wrap{max-width:1120px;margin:0 auto;padding:32px 24px 80px}
-  a{color:var(--accent)}
-  header{display:flex;align-items:flex-start;justify-content:space-between;gap:24px;flex-wrap:wrap;
-    border-bottom:1px solid var(--border);padding-bottom:22px;margin-bottom:28px}
-  .brand{font-family:var(--mono);font-weight:700;font-size:13px;letter-spacing:.34em;color:var(--muted)}
-  h1{margin:.18em 0 .1em;font-size:30px;letter-spacing:-.02em;
-    background:linear-gradient(92deg,#fff 10%,#ff8a5c 55%,var(--exposed) 100%);
-    -webkit-background-clip:text;background-clip:text;color:transparent}
-  .sub{color:var(--muted);font-size:14px;max-width:48ch}
-  .meta{font-family:var(--mono);font-size:12px;color:var(--muted);text-align:right;white-space:nowrap}
-  .meta b{color:var(--text);font-weight:600}
-  .pill{display:inline-flex;align-items:center;gap:7px;font-family:var(--mono);font-size:12px;
-    padding:6px 12px;border-radius:999px;border:1px solid var(--border);margin-top:10px}
-  .pill .dot{width:8px;height:8px;border-radius:50%}
-  .pill.bad{border-color:#5a2330;background:#1c1014;color:#ff9aa0}
-  .pill.ok{border-color:#1f4636;background:#0e1a14;color:#7ee0ad}
-  .grid-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:30px}
-  .stat{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:16px 18px}
-  .stat .n{font-size:30px;font-weight:700;font-family:var(--mono);line-height:1}
-  .stat .l{font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--muted);margin-top:8px}
-  .stat.exposed .n{color:var(--exposed)} .stat.notable .n{color:var(--notable)}
-  .stat .ex{color:var(--exposed)}
-  .panel{background:linear-gradient(180deg,var(--panel) 0,var(--panel2) 100%);
-    border:1px solid var(--border);border-radius:16px;padding:24px;margin-bottom:24px}
-  .panel h2{margin:0 0 4px;font-size:13px;letter-spacing:.2em;text-transform:uppercase;color:var(--muted)}
-  .panel .hint{color:var(--dim);font-size:12px;margin-bottom:18px;font-family:var(--mono)}
-  .radial{display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:20px;align-items:center}
-  @media(max-width:820px){.radial{grid-template-columns:1fr}}
-  svg{width:100%;height:auto;display:block}
-  .node{cursor:pointer;transition:transform .12s}
-  .node:hover circle{stroke:#fff}
-  .detail{background:var(--panel2);border:1px solid var(--border);border-radius:12px;padding:18px;min-height:170px}
-  .detail .dt{font-family:var(--mono);font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted)}
-  .detail .dtitle{font-size:16px;font-weight:600;margin:8px 0}
-  .detail .dsum{font-size:13.5px;color:var(--muted)}
-  .sevtag{display:inline-block;font-family:var(--mono);font-size:10.5px;letter-spacing:.08em;
-    text-transform:uppercase;padding:3px 8px;border-radius:6px;font-weight:600}
-  .sev-exposed{background:#2a1316;color:var(--exposed)} .sev-notable{background:#2a2110;color:var(--notable)}
-  .sev-info{background:#161b22;color:var(--muted)}
-  .sev-critical{background:#2a1316;color:#ff4d57} .sev-high{background:#2a1316;color:#ff7a4d}
-  .sev-medium{background:#2a2110;color:var(--notable)} .sev-low{background:#161b22;color:var(--accent)}
-  .scen{border:1px solid var(--border);border-left:3px solid var(--dim);border-radius:12px;
-    padding:18px 20px;margin-bottom:14px;background:var(--panel2)}
-  .scen.s-critical,.scen.s-high{border-left-color:var(--exposed)}
-  .scen.s-medium{border-left-color:var(--notable)} .scen.s-low{border-left-color:var(--accent)}
-  .scen .top{display:flex;align-items:center;gap:12px;margin-bottom:8px}
-  .scen h3{margin:0;font-size:17px}
-  .scen .narr{color:var(--text);font-size:14px;margin:6px 0 14px}
-  .chain{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:12px 0}
-  .step{font-family:var(--mono);font-size:12px;background:#0c1118;border:1px solid var(--border);
-    border-radius:7px;padding:6px 10px;position:relative}
-  .arrow{color:var(--dim);font-size:14px}
-  .chips{display:flex;flex-wrap:wrap;gap:6px;margin:10px 0}
-  .chip{font-family:var(--mono);font-size:11px;color:var(--accent);background:#0a1620;
-    border:1px solid #143042;border-radius:999px;padding:4px 10px}
-  .impact{font-size:13px;color:#ffb9a3;background:#1a0f0c;border:1px solid #3a1d14;
-    border-radius:8px;padding:10px 12px;margin:12px 0}
-  .contain{list-style:none;padding:0;margin:8px 0 0}
-  .contain li{font-size:13px;color:var(--muted);padding:4px 0 4px 22px;position:relative}
-  .contain li::before{content:"⛨";position:absolute;left:0;color:var(--good)}
-  .label{font-family:var(--mono);font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;
-    color:var(--dim);margin:14px 0 6px}
-  table{width:100%;border-collapse:collapse;font-size:13.5px}
-  .cls{font-family:var(--mono);font-size:11px;letter-spacing:.16em;color:var(--muted);
-    padding:18px 0 6px;text-transform:uppercase}
-  tr.f{border-top:1px solid var(--border)}
-  tr.f td{padding:9px 8px;vertical-align:top}
-  .ftitle{font-weight:500} .fsum{color:var(--muted);font-size:12.5px}
-  td.sevcell{width:90px} td.confcell{width:96px;color:var(--dim);font-family:var(--mono);font-size:11px;text-align:right}
-  .notice{font-size:12.5px;color:var(--muted);background:var(--panel2);border:1px dashed var(--border);
-    border-radius:10px;padding:14px 16px;margin-bottom:24px}
-  .notice b{color:var(--text)}
-  footer{color:var(--dim);font-size:12px;font-family:var(--mono);border-top:1px solid var(--border);
-    padding-top:18px;margin-top:30px}
-  .err{color:var(--exposed)}
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: var(--bg); color: var(--txt); }
+  body {
+    font-family: var(--sans);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+    overflow-x: hidden;
+  }
+  ::selection { background: rgba(255,91,53,.3); }
+
+  /* scrollbar */
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-track { background: var(--bg); }
+  ::-webkit-scrollbar-thumb { background: #20283a; border-radius: 6px; border: 2px solid var(--bg); }
+  ::-webkit-scrollbar-thumb:hover { background: #2c3852; }
+
+  .mono { font-family: var(--mono); }
+  .sev-exposed { color: var(--hot); }
+  .sev-notable { color: var(--warn); }
+  .sev-info    { color: var(--info); }
+
+  /* film grain / vignette overlay for cinematic feel */
+  .grain {
+    position: fixed; inset: 0; pointer-events: none; z-index: 9999;
+    background:
+      radial-gradient(120% 90% at 50% 10%, transparent 55%, rgba(0,0,0,.55) 100%);
+    mix-blend-mode: multiply;
+  }
+
+  #root { position: relative; z-index: 1; }
+
+  /* generic button */
+  .btn {
+    font-family: var(--sans); font-weight: 600; font-size: 14px;
+    color: var(--txt); background: var(--surface);
+    border: 1px solid var(--line-2); border-radius: 10px;
+    padding: 10px 18px; cursor: pointer; transition: all .18s ease;
+    letter-spacing: .2px;
+  }
+  .btn:hover { background: var(--surface-2); border-color: var(--txt-dim); transform: translateY(-1px); }
+  .btn-hot { background: linear-gradient(180deg, var(--hot-2), var(--hot)); color: #1a0a04; border: none; box-shadow: var(--glow-hot); }
+  .btn-hot:hover { filter: brightness(1.06); }
+  .btn-ghost { background: transparent; }
+
+  @keyframes pulseRing {
+    0%   { transform: scale(.6); opacity: .7; }
+    100% { transform: scale(2.6); opacity: 0; }
+  }
+  @keyframes breathe {
+    0%,100% { opacity: .55; }
+    50%     { opacity: 1; }
+  }
+  @keyframes dashFlow { to { stroke-dashoffset: -1000; } }
+  @keyframes fadeUp {
+    from { opacity: 0; transform: translateY(18px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    * { animation-duration: .001ms !important; animation-iteration-count: 1 !important; }
+  }
 </style>
 </head>
 <body>
-<div class="wrap">
-  <header>
-    <div>
-      <div class="brand">● BLASTRADIUS</div>
-      <h1 id="h1">blast radius</h1>
-      <div class="sub">What a coding agent running as you can reach on this machine — and how that reach could be chained.</div>
-      <div id="verdict"></div>
+  <div class="grain"></div>
+  <div id="root"></div>
+
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" crossorigin="anonymous"></script>
+
+  <script id="br-data" type="application/json">/*__BR_DATA__*/</script>
+
+  <script>
+/* blastradius storytelling — data model
+ * Realistic illustrative data for a plausible developer machine.
+ * No real secrets. Everything is value-free metadata, mirroring the CLI's contract.
+ */
+(function () {
+  "use strict";
+
+  // ---- LIVE DATA from the running scan (injected by build_data) ----------
+  // Read the JSON the CLI inlines at #br-data. Default to {} so the page still
+  // renders from the canonical fixtures when served standalone / without a scan.
+  let D = {};
+  try {
+    const el = document.getElementById("br-data");
+    if (el && el.textContent) D = JSON.parse(el.textContent) || {};
+  } catch (e) { D = {}; }
+
+  // ---- Ambient reachable surface (the DENOMINATOR) -----------------------
+  // Grouped into concentric "rings" — each ring is one step further from the task.
+  const RINGS = [
+    {
+      id: "shell",
+      n: 1,
+      label: "This shell",
+      blurb: "The environment the agent was handed.",
+      findings: [
+        { id: "env.secret_names", title: "Secret-named env vars", sev: "exposed",
+          metric: "4 reachable", detail: ["GITHUB_TOKEN — 40 chars", "OPENAI_API_KEY — 51 chars", "STRIPE_SECRET_KEY — 31 chars", "DATABASE_URL — present"] },
+        { id: "credentials.shell_history", title: "Shell history", sev: "notable",
+          metric: "3 secret-looking lines", detail: ["~/.zsh_history — 3 matches", "token-prefix + export patterns"] },
+        { id: "cross_repo.dotenv", title: ".env files (this repo)", sev: "exposed",
+          metric: "1 file · 12 keys", detail: ["./.env — 12 keys", "values never read"] },
+      ],
+    },
+    {
+      id: "identity",
+      n: 2,
+      label: "Your identity",
+      blurb: "The keys and tokens that say you are you.",
+      findings: [
+        { id: "ssh.private_keys", title: "SSH private keys", sev: "exposed",
+          metric: "3 keys readable", detail: ["id_ed25519, id_rsa, work_rsa", "passphrase status not checked"] },
+        { id: "ssh.agent_socket", title: "ssh-agent", sev: "notable",
+          metric: "2 identities loaded", detail: ["usable without the key files"] },
+        { id: "github.token_source", title: "GitHub auth source", sev: "exposed",
+          metric: "present for github.com", detail: ["gh hosts.yml — user: octocat", "scopes not verified (local introspection only)"] },
+        { id: "git.credential_store", title: "Git credential store", sev: "exposed",
+          metric: "2 hosts", detail: ["github.com — stored", "api.heroku.com — .netrc"] },
+      ],
+    },
+    {
+      id: "cloud",
+      n: 3,
+      label: "The cloud",
+      blurb: "Provider identities mounted into your shell.",
+      findings: [
+        { id: "aws.credentials.profiles", title: "AWS profiles", sev: "exposed",
+          metric: "2 profiles", detail: ["default", "prod"] },
+        { id: "egress.mediation", title: "Cloud metadata", sev: "notable",
+          metric: "reachable", detail: ["169.254.169.254 — reachability always checked"] },
+      ],
+    },
+    {
+      id: "neighbors",
+      n: 4,
+      label: "Neighboring repos",
+      blurb: "Everything else sitting next to the task on disk.",
+      findings: [
+        { id: "cross_repo.sibling_repos", title: "Sibling repos", sev: "notable",
+          metric: "23 readable", detail: ["~/code/api, ~/code/web, ~/code/infra …", "+20 more"] },
+        { id: "cross_repo.lateral_secrets", title: "Secrets in siblings", sev: "exposed",
+          metric: "7 repos · 91 keys", detail: [".env, *.pem, service-account.json", "counted, never read"] },
+      ],
+    },
+    {
+      id: "network",
+      n: 5,
+      label: "The network",
+      blurb: "Where data could go, and where code could land.",
+      findings: [
+        { id: "egress.connectivity", title: "Outbound egress", sev: "exposed",
+          metric: "open · 19 ms", detail: ["DNS + TLS to 1.1.1.1 ok", "no findings sent"] },
+        { id: "git.push_likelihood", title: "Push likelihood", sev: "exposed",
+          metric: "likely", detail: ["ssh remote + readable keys", "branch protection is server-side, unverified"] },
+      ],
+    },
+    {
+      id: "host",
+      n: 6,
+      label: "The whole machine",
+      blurb: "Beyond the task: the box itself.",
+      findings: [
+        { id: "host.privilege_escalation", title: "Privilege escalation", sev: "exposed",
+          metric: "docker group → root", detail: ["NOPASSWD sudo entries", "container runtime reachable"] },
+        { id: "process.memory_introspection", title: "Process memory", sev: "notable",
+          metric: "ptrace permitted", detail: ["dump ssh-agent / browser RAM"] },
+        { id: "browser.session_stores", title: "Browser sessions", sev: "exposed",
+          metric: "cookie jars present", detail: ["session hijack past password + MFA"] },
+      ],
+    },
+  ];
+
+  // Flat index of findings for joins
+  const FINDINGS = {};
+  RINGS.forEach((r) => r.findings.forEach((f) => { FINDINGS[f.id] = Object.assign({ ring: r.id }, f); }));
+
+  function counts() {
+    // Prefer the live scan's tallies when present.
+    if (D.stats && (typeof D.stats.exposed === "number" || typeof D.stats.notable === "number")) {
+      const exposed = D.stats.exposed || 0;
+      const notable = D.stats.notable || 0;
+      const total = (typeof D.stats.total === "number") ? D.stats.total : (exposed + notable);
+      return { exposed, notable, total };
+    }
+    let exposed = 0, notable = 0;
+    Object.values(FINDINGS).forEach((f) => { if (f.sev === "exposed") exposed++; else if (f.sev === "notable") notable++; });
+    return { exposed, notable, total: Object.keys(FINDINGS).length };
+  }
+
+  // ---- LIVE per-ring overlay (the live denominator) ----------------------
+  // Map each live finding's `severity` value to the `sev` field the viz expects,
+  // and its `metric` (summary). Falls back to the canonical RINGS literal when
+  // no live rings are present so every fixture node id always resolves.
+  const LIVE_RINGS = (D.rings && D.rings.length)
+    ? D.rings.map((r) => ({
+        id: r.id, n: r.n, label: r.label, blurb: r.blurb,
+        findings: (r.findings || []).map((f) => ({
+          id: f.id, title: f.title, sev: f.severity,
+          metric: f.metric, detail: f.detail || [],
+        })),
+      }))
+    : RINGS;
+
+  // ---- Sessions (the NUMERATOR) ------------------------------------------
+  // Each event carries paths/commands/hosts only — never values.
+  const SESSIONS = {
+    benign: {
+      id: "benign",
+      label: "Refactor: extract date helpers",
+      sub: "A routine, well-behaved task.",
+      score: 12,
+      level: "low",
+      decision: "allow",
+      events: [
+        { t: "fileRead", signal: null, title: "read", arg: "src/dates.ts", weight: 0 },
+        { t: "fileRead", signal: null, title: "read", arg: "src/format.ts", weight: 0 },
+        { t: "shell", signal: "shell_command", title: "run", arg: "cargo test", weight: 10, ref: null },
+        { t: "fileWrite", signal: null, title: "write", arg: "src/util/dates.ts", weight: 0 },
+        { t: "fileWrite", signal: null, title: "write", arg: "src/util/dates.test.ts", weight: 0 },
+      ],
+      combos: [],
+      reasons: [
+        { signal: "shell_command", weight: 10, ref: null, evidence: ["1 shell command: cargo test", "no ambient finding joined — stays in the denominator"] },
+        { signal: "production_repo", weight: "×1.4", ref: null, evidence: ["repo is flagged production"] },
+      ],
+    },
+    risky: {
+      id: "risky",
+      label: "Fix: flaky deploy + add telemetry",
+      sub: "Looks ordinary. Reaches everywhere.",
+      score: 96,
+      level: "critical",
+      decision: "block",
+      events: [
+        { t: "fileRead", signal: "read_secret", title: "read", arg: "~/.aws/credentials", weight: 30, ref: "aws.credentials.profiles", hot: true },
+        { t: "shell", signal: "read_secret", title: "run", arg: "cat .env  ·  env | grep KEY", weight: 0, ref: "env.secret_names", note: "value-free: reduced to key + length" },
+        { t: "fileWrite", signal: "modified_production_deploy", title: "write", arg: ".github/workflows/deploy.yml", weight: 25, ref: "git.push_likelihood", hot: true },
+        { t: "network", signal: "network_access", title: "connect", arg: "telemetry-sink.example.io:443", weight: 15, ref: "egress.connectivity", hot: true },
+        { t: "shell", signal: "dangerous_shell_pattern", title: "run", arg: "pattern: curl | sh", weight: 25, ref: "host.privilege_escalation", note: "pattern: curl | sh (substring stripped)", hot: true },
+        { t: "fileWrite", signal: "edited_auth/payment/security_code", title: "write", arg: "src/auth/session.ts", weight: 20, ref: "git.push_likelihood", hot: true },
+      ],
+      combos: ["exfiltration_path", "production_deployment_path", "source_control_mutation_path", "high_review_risk"],
+      reasons: [
+        { signal: "read_secret", weight: 30, ref: "aws.credentials.profiles", evidence: ["file_read ~/.aws/credentials", "joins AWS profiles (2)"] },
+        { signal: "modified_production_deploy", weight: 25, ref: "git.push_likelihood", evidence: ["file_write .github/workflows/deploy.yml", "joins push likelihood: likely"] },
+        { signal: "dangerous_shell_pattern", weight: 25, ref: "host.privilege_escalation", evidence: ["shell pattern: curl | sh", "category only — substring stripped"] },
+        { signal: "edited_auth/payment/security_code", weight: 20, ref: "git.push_likelihood", evidence: ["file_write src/auth/session.ts"] },
+        { signal: "network_access", weight: 15, ref: "egress.connectivity", evidence: ["network_access telemetry-sink.example.io:443", "joins egress: open"] },
+        { signal: "exfiltration_path", weight: "+40 path", ref: "egress.connectivity", evidence: ["critical toxic combination"] },
+        { signal: "production_deployment_path", weight: "+40 path", ref: "git.push_likelihood", evidence: ["critical toxic combination"] },
+        { signal: "production_repo", weight: "×1.4", ref: null, evidence: ["repo is flagged production"] },
+        { signal: "escalation_amplifier", weight: "×1.5", ref: "host.privilege_escalation", evidence: ["escalation reachable AND a shell command ran"] },
+      ],
+    },
+  };
+
+  // ---- Toxic-combination catalog (event(s) × ambient finding(s) → PATH) ---
+  const COMBOS = {
+    exfiltration_path: {
+      name: "exfiltration_path",
+      title: "Credential exfiltration path",
+      sev: "critical",
+      derived: "A secret was read and an outbound route is open. Anything read here can leave the machine.",
+      legs: ["read_secret", "egress.connectivity"],
+      nodes: ["aws.credentials.profiles", "egress.connectivity"],
+      evidence: ["read ~/.aws/credentials", "+ outbound egress open", "→ reachable secret can leave the host"],
+    },
+    production_deployment_path: {
+      name: "production_deployment_path",
+      title: "Production deployment path",
+      sev: "critical",
+      derived: "A deploy workflow was edited and a push is likely to be accepted. A change could ship to production.",
+      legs: ["modified_production_deploy", "git.push_likelihood"],
+      nodes: ["git.push_likelihood"],
+      evidence: ["wrote .github/workflows/deploy.yml", "+ push likelihood: likely", "→ change composes into a deploy"],
+    },
+    source_control_mutation_path: {
+      name: "source_control_mutation_path",
+      title: "Source-control mutation path",
+      sev: "high",
+      derived: "A tracked file was written and an ssh-agent identity can authenticate the push.",
+      legs: ["ssh.agent_socket", "git.push_likelihood"],
+      nodes: ["ssh.agent_socket", "git.push_likelihood"],
+      evidence: ["file-write to tracked src/auth/session.ts (event trigger)", "+ ssh-agent identity loaded · push likelihood: likely", "→ commit + push composes"],
+    },
+    high_review_risk: {
+      name: "high_review_risk",
+      title: "Unreviewed sensitive-code change",
+      sev: "high",
+      derived: "Auth/payment/security code was changed with no covering approval. A review-control gap, not ambient reach.",
+      legs: ["edited_auth/payment/security_code"],
+      nodes: ["git.push_likelihood"],
+      evidence: ["wrote src/auth/session.ts", "no covering approval event", "→ ships without human review"],
+    },
+    saas_session_hijack: {
+      name: "saas_session_hijack",
+      title: "SaaS session hijack",
+      sev: "high",
+      derived: "A browser session/cookie store was read and an outbound route is open — a live session can be replayed past password + MFA.",
+      legs: ["browser.session_stores", "egress.connectivity"],
+      nodes: ["browser.session_stores", "egress.connectivity"],
+      evidence: ["read a browser session store", "+ outbound egress open", "→ session token can leave the host"],
+    },
+  };
+
+  // ---- Containment simulator ---------------------------------------------
+  // Stacked ladder (fixed order) and independent single-control deltas.
+  const CONTROLS = [
+    { id: "repo_only_filesystem", label: "Repo-only filesystem", cat: "Filesystem isolation",
+      desc: "Mount only the task repo + explicit deps. No broad $HOME or sibling-repo access.",
+      indep: 35, suppresses: ["cross_repo.sibling_repos", "cross_repo.lateral_secrets", "cross_repo.dotenv", "browser.session_stores", "credentials.shell_history"],
+      kills: [] },
+    { id: "no_egress", label: "No egress", cat: "Egress control",
+      desc: "Default-deny outbound, then allowlist what the task needs.",
+      indep: 13, suppresses: ["egress.connectivity", "egress.mediation"],
+      kills: ["exfiltration_path"] },
+    { id: "no_ssh_agent", label: "No ssh-agent", cat: "Credential substitution",
+      desc: "Don't forward the ssh-agent socket into the agent's environment.",
+      indep: 6, suppresses: ["ssh.agent_socket"],
+      kills: ["source_control_mutation_path"] },
+    { id: "scoped_temp_cloud_creds", label: "Scoped temp creds", cat: "Credential substitution",
+      desc: "Short-lived, narrowly-scoped creds per agent instead of your full identity.",
+      indep: 14, suppresses: ["aws.credentials.profiles", "github.token_source", "git.credential_store", "env.secret_names"],
+      kills: ["exfiltration_path"] },
+    { id: "process_isolation", label: "Process isolation", cat: "Process isolation",
+      desc: "Prevent same-user process inspection and access to other local dev tools.",
+      indep: 17, suppresses: ["process.memory_introspection", "host.privilege_escalation"],
+      kills: [] },
+  ];
+
+  // Headline stacked ladder for the risky session (spec figures).
+  const LADDER = [
+    { label: "baseline (no controls)", control: null, score: 96, delta: 0 },
+    { label: "+ repo-only filesystem", control: "repo_only_filesystem", score: 61, delta: -35 },
+    { label: "+ no egress", control: "no_egress", score: 48, delta: -13 },
+    { label: "+ no ssh-agent", control: "no_ssh_agent", score: 42, delta: -6 },
+    { label: "+ scoped temp creds", control: "scoped_temp_cloud_creds", score: 28, delta: -14 },
+    { label: "+ process isolation", control: "process_isolation", score: 11, delta: -17 },
+  ];
+  const RESIDUAL = {
+    floor: 11,
+    reason: "in-repo auth-code edit, unreviewed — needs human review / server-side enforcement.",
+  };
+
+  function levelOf(score) {
+    if (score >= 75) return "critical";
+    if (score >= 50) return "high";
+    if (score >= 25) return "medium";
+    return "low";
+  }
+
+  // Recompute a session score given a set of active control ids.
+  // Illustrative model: start from baseline, subtract the stacked deltas for the
+  // controls that are on, in the fixed ladder order, but never below the floor.
+  function simulate(activeIds) {
+    const order = LADDER.slice(1); // skip baseline
+    let score = 96;
+    const applied = [];
+    order.forEach((step) => {
+      if (activeIds.has(step.control)) {
+        score += step.delta;
+        applied.push(step.control);
+      }
+    });
+    score = Math.max(RESIDUAL.floor, Math.min(96, score));
+    if (activeIds.size === 0) score = 96;
+    // which combos survive
+    const killed = new Set();
+    CONTROLS.forEach((c) => { if (activeIds.has(c.id)) c.kills.forEach((k) => killed.add(k)); });
+    return { score, level: levelOf(score), killed };
+  }
+
+  // ---- §24 AUTO-SLURP + RETRO-HAZARD -------------------------------------
+  // Passively discovered agent transcripts on disk (§24.1) and the historical
+  // hazards re-resolved against TODAY's reachable surface (§24.3).
+  const AGENTS_DISCOVERED = [
+    { tag: "claude-code", name: "Claude Code", sessions: 14 },
+    { tag: "codex",       name: "Codex CLI",   sessions: 6 },
+    { tag: "cursor",      name: "Cursor",      sessions: 9 },
+    { tag: "copilot",     name: "Copilot CLI", sessions: 3 },
+    { tag: "opencode",    name: "opencode",    sessions: 2 },
+    { tag: "antigravity", name: "Antigravity", sessions: 1 },
+    { tag: "factory",     name: "Factory Droid", sessions: 1 },
+    { tag: "aider",       name: "Aider",       sessions: 4 },
+  ];
+
+  // Remediations the operator can apply now (each removes an ambient finding leg).
+  const REMEDIATIONS = [
+    { id: "aws.credentials.profiles", label: "Rotate cloud credentials" },
+    { id: "egress.connectivity",      label: "Close outbound egress" },
+    { id: "browser.session_stores",   label: "Clear browser sessions" },
+    { id: "git.push_likelihood",      label: "Scope the push token" },
+  ];
+
+  // Historical hazards. `required` = finding ids that must still fire for the
+  // hazard to be live. `deadAtStart` = legs already remediated since the session.
+  const HAZARDS = [
+    { hid: "3f2a…e1", agent: "claude-code", source: "~/.claude/projects/app/3f2a…e1.jsonl",
+      age: "3 days ago", ageDays: 3, combo: "exfiltration_path", sev: "critical",
+      required: ["aws.credentials.profiles", "egress.connectivity"], base: 40,
+      ordering: "read → egress",
+      events: ["file_read  ~/.aws/credentials", "shell_command  curl [custom egress target]"],
+      summary: "Read an AWS credential store, then ran an external-egress command." },
+    { hid: "b71c…90", agent: "codex", source: "~/.codex/sessions/2026/06/07/rollout-…jsonl",
+      age: "6 days ago", ageDays: 6, combo: "production_deployment_path", sev: "critical",
+      required: ["git.push_likelihood"], base: 40,
+      events: ["file_write  .github/workflows/deploy.yml"],
+      summary: "Edited a deploy workflow; a push to the remote is still likely to be accepted." },
+    { hid: "cc4f…12", agent: "cursor", source: "~/.cursor/projects/web/agent-transcripts/…jsonl",
+      age: "9 days ago", ageDays: 9, combo: "saas_session_hijack", sev: "high",
+      required: ["browser.session_stores", "egress.connectivity"], base: 25,
+      events: ["file_read  Cookies (browser store)", "network_access  [custom egress target]"],
+      summary: "Read a browser session store, then opened an outbound connection." },
+    { hid: "a0d7…e3", agent: "copilot", source: "~/.copilot/session-state/…/events.jsonl",
+      age: "12 days ago", ageDays: 12, combo: "exfiltration_path", sev: "critical",
+      required: ["env.secret_names", "egress.connectivity"], base: 40,
+      deadAtStart: ["env.secret_names"],
+      events: ["shell_command  env | grep TOKEN", "network_access  [custom egress target]"],
+      summary: "Read secret-named env vars, then egressed — but that env var is gone now." },
+  ];
+
+  function retroDecay(d) { return Math.max(Math.pow(0.5, d / 14), 0.25); }
+
+  // Review-control-gap lane (§23.8 high_review_risk): NO reachability claim.
+  // review_score (§24.3 #9b) = clamp(round(combo_base * decay(ageDays) * 1.5), 0, 60),
+  // combo_base = 25 (high). This is a review-control signal, not a reachability claim.
+  function reviewScore(ageDays) {
+    return Math.max(0, Math.min(60, Math.round(25 * retroDecay(ageDays) * 1.5)));
+  }
+  const REVIEW_GAPS = [
+    { hid: "77aa…10", agent: "claude-code", age: "5 days ago", ageDays: 5,
+      combo: "high_review_risk", sev: "high",
+      review_score: reviewScore(5),
+      events: ["file_write  src/auth/session.ts", "— no covering approval event"],
+      summary: "Auth code changed with no covering approval. A review-control gap — not a reachability claim." },
+  ];
+
+  // 4-TIER reach ladder (§24.3 #9a):
+  //   1.00 — all legs live AND every live leg is Exposed (fully realized reach)
+  //   0.70 — all legs live but not all are Exposed (mixed-severity reach)
+  //   0.45 — only some legs live (partial)
+  //   0.10 — no legs live (remediated)
+  // Severity is read from the live finding when present, else the fixture FINDING.
+  function reachTier(legs) {
+    const liveLegs = legs.filter((l) => l.live);
+    if (liveLegs.length === 0) return 0.10;
+    const allLive = liveLegs.length === legs.length;
+    if (!allLive) return 0.45;
+    const sevOf = (fid) => {
+      const lf = FINDINGS[fid];
+      return lf ? lf.sev : null;
+    };
+    const allExposed = liveLegs.every((l) => sevOf(l.ref) === "exposed");
+    return allExposed ? 1.00 : 0.70;
+  }
+
+  // Re-resolve one hazard against today's findings minus the `dead` set.
+  function retroResolve(hz, dead) {
+    const deadAll = new Set([...(hz.deadAtStart || []), ...dead]);
+    const legs = hz.required.map((fid) => ({ ref: fid, live: !deadAll.has(fid) }));
+    const liveCount = legs.filter((l) => l.live).length;
+    const allLive = liveCount === hz.required.length;
+    const status = allLive ? "still_reachable" : (liveCount > 0 ? "partial" : "remediated");
+    const reach = reachTier(legs);
+    const durability = 1 + 0.15 * (liveCount / hz.required.length);
+    const realized = Math.max(0, Math.min(100, Math.round(hz.base * reach * durability * retroDecay(hz.ageDays) * 2.5)));
+    return { legs, status, realized, live: allLive };
+  }
+
+  window.BR = {
+    RINGS, LIVE_RINGS, FINDINGS, SESSIONS, COMBOS, CONTROLS, LADDER, RESIDUAL,
+    AGENTS_DISCOVERED, REMEDIATIONS, HAZARDS, REVIEW_GAPS, retroResolve,
+    counts, levelOf, simulate,
+    BREADTH: {
+      probes: (D.stats && D.stats.breadth && D.stats.breadth.probes) || 35,
+      stores: (D.stats && D.stats.breadth && D.stats.breadth.stores) || 30,
+    },
+    SEV_LABEL: { exposed: "Exposed", notable: "Notable", info: "Info" },
+  };
+})();
+
+  </script>
+
+  <script type="text/babel">
+/* viz.jsx — the two hero visualizations:
+ *   RadiusViz      : concentric expanding rings (scrollytelling denominator)
+ *   Constellation  : node graph that lights up as a session plays (dashboard)
+ */
+const { useMemo, useRef, useEffect, useState } = React;
+
+const SEV_COLOR = { exposed: "var(--hot)", notable: "var(--warn)", info: "var(--info)" };
+
+/* ---- shared layout: place every finding at a deterministic angle/ring ---- */
+function useLayout() {
+  return useMemo(() => {
+    const RINGS = window.BR.RINGS;
+    const ringR = { shell: 0.20, identity: 0.36, cloud: 0.50, neighbors: 0.66, network: 0.82, host: 0.97 };
+    const startAngle = { shell: -90, identity: -50, cloud: 30, neighbors: -110, network: 20, host: -70 };
+    const pos = {};
+    RINGS.forEach((ring) => {
+      const r = ringR[ring.id];
+      const n = ring.findings.length;
+      const spread = Math.min(300, 70 * n);
+      const base = startAngle[ring.id];
+      ring.findings.forEach((f, i) => {
+        // n<2: avoid i/(n-1) (division by zero -> NaN); pin to the base angle.
+        const a = (base + (n < 2 ? 0 : (i / (n - 1) - 0.5) * spread)) * Math.PI / 180;
+        pos[f.id] = { r, a, x: 0.5 + r * 0.5 * Math.cos(a), y: 0.5 + r * 0.5 * Math.sin(a), ring: ring.id, sev: f.sev };
+      });
+    });
+    return { ringR, pos, RINGS };
+  }, []);
+}
+
+/* ============================ RADIUS VIZ ============================ */
+/* revealed: how many rings are shown (0..6); float allowed for smooth scroll */
+function RadiusViz({ revealed }) {
+  const { ringR, pos, RINGS } = useLayout();
+  const S = 1000, C = S / 2;
+  const ringRadii = { shell: 0.20, identity: 0.36, cloud: 0.50, neighbors: 0.66, network: 0.82, host: 0.97 };
+
+  return (
+    <svg viewBox={`0 0 ${S} ${S}`} style={{ width: "100%", height: "100%", display: "block" }}>
+      <defs>
+        <radialGradient id="coreGlow" cx="50%" cy="50%" r="50%">
+          <stop offset="0%" stopColor="var(--hot-2)" stopOpacity="0.9" />
+          <stop offset="40%" stopColor="var(--hot)" stopOpacity="0.5" />
+          <stop offset="100%" stopColor="var(--hot)" stopOpacity="0" />
+        </radialGradient>
+        <filter id="soft"><feGaussianBlur stdDeviation="3" /></filter>
+      </defs>
+
+      {/* faint full-field glow scales with reveal */}
+      <circle cx={C} cy={C} r={C * Math.min(1, revealed / 6) * 0.98}
+        fill="url(#coreGlow)" opacity={0.18 + 0.12 * Math.min(1, revealed / 6)} />
+
+      {RINGS.map((ring, idx) => {
+        const ord = idx + 1;
+        const show = revealed >= idx + 0.15;
+        const local = Math.max(0, Math.min(1, revealed - idx));
+        const rr = ringRadii[ring.id] * C;
+        return (
+          <g key={ring.id} style={{ opacity: show ? 1 : 0, transition: "opacity .5s ease" }}>
+            <circle cx={C} cy={C} r={rr} fill="none"
+              stroke={SEV_COLOR.exposed} strokeOpacity={0.10 + 0.10 * local}
+              strokeWidth={1.2} strokeDasharray="2 7" />
+            {ring.findings.map((f) => {
+              const p = pos[f.id];
+              const x = C + (p.x - 0.5) * S, y = C + (p.y - 0.5) * S;
+              const col = SEV_COLOR[f.sev];
+              return (
+                <g key={f.id} transform={`translate(${x},${y})`}
+                   style={{ opacity: local > 0.2 ? 1 : 0, transition: "opacity .5s ease" }}>
+                  <line x1={(C - x)} y1={(C - y)} x2={0} y2={0}
+                    stroke={col} strokeOpacity={0.18} strokeWidth={1} />
+                  <circle r={9} fill={col} opacity={0.18} filter="url(#soft)" />
+                  <circle r={4.5} fill={col} />
+                </g>
+              );
+            })}
+          </g>
+        );
+      })}
+
+      {/* core: YOU */}
+      <circle cx={C} cy={C} r={26} fill="url(#coreGlow)" />
+      <circle cx={C} cy={C} r={11} fill="var(--hot-2)" />
+      <circle cx={C} cy={C} r={11} fill="none" stroke="#1a0a04" strokeWidth={2} />
+    </svg>
+  );
+}
+
+/* ============================ CONSTELLATION ============================ */
+/* props:
+ *   activeFindings : Set of finding ids currently "touched"
+ *   combos         : array of combo objects to draw paths for
+ *   suppressed     : Set of finding ids greyed out (containment)
+ *   onPick(id)     : click a node
+ *   dim            : overall dim factor for ambient (untouched) nodes
+ */
+function Constellation({ activeFindings, combos, suppressed, onPick, picked }) {
+  const { pos, RINGS } = useLayout();
+  const S = 1000, C = S / 2;
+  activeFindings = activeFindings || new Set();
+  suppressed = suppressed || new Set();
+  combos = combos || [];
+
+  // Guarded position lookup: a live scan may omit a fixture-referenced id, so
+  // return null instead of dereferencing undefined (would white-screen React).
+  const P = (id) => { const p = pos[id]; return p ? { x: C + (p.x - 0.5) * S, y: C + (p.y - 0.5) * S } : null; };
+
+  return (
+    <svg viewBox={`0 0 ${S} ${S}`} style={{ width: "100%", height: "100%", display: "block" }}>
+      <defs>
+        <radialGradient id="cCore" cx="50%" cy="50%" r="50%">
+          <stop offset="0%" stopColor="var(--hot-2)" stopOpacity="1" />
+          <stop offset="60%" stopColor="var(--hot)" stopOpacity="0.4" />
+          <stop offset="100%" stopColor="var(--hot)" stopOpacity="0" />
+        </radialGradient>
+        <filter id="cglow" x="-80%" y="-80%" width="260%" height="260%">
+          <feGaussianBlur stdDeviation="6" result="b" />
+          <feMerge><feMergeNode in="b" /><feMergeNode in="SourceGraphic" /></feMerge>
+        </filter>
+      </defs>
+
+      {/* faint ring guides */}
+      {[0.20,0.36,0.50,0.66,0.82,0.97].map((r,i)=>(
+        <circle key={i} cx={C} cy={C} r={r*C} fill="none" stroke="rgba(255,255,255,0.05)" strokeWidth="1" />
+      ))}
+
+      {/* spokes to active nodes */}
+      {RINGS.map((ring) => ring.findings.map((f) => {
+        const isActive = activeFindings.has(f.id);
+        const isSupp = suppressed.has(f.id);
+        if (!isActive || isSupp) return null;
+        const p = P(f.id);
+        if (!p) return null;
+        return <line key={"sp"+f.id} x1={C} y1={C} x2={p.x} y2={p.y}
+          stroke="var(--hot)" strokeOpacity={0.5} strokeWidth={1.6} />;
+      }))}
+
+      {/* toxic combination paths */}
+      {combos.map((combo) => {
+        const allLive = combo.nodes.every((n) => !suppressed.has(n));
+        if (!allLive) return null;
+        const col = combo.sev === "critical" ? "var(--crit)" : "var(--warn)";
+        // A live scan may not surface every fixture node; drop any that don't
+        // resolve to a position so a missing id can't white-screen the tree.
+        const pts = combo.nodes.map(P).filter(Boolean);
+        if (pts.length < 2) return null;
+        return (
+          <g key={"cmb"+combo.name}>
+            {pts.slice(0, -1).map((p, i) => {
+              const q = pts[i + 1];
+              return <line key={i} x1={p.x} y1={p.y} x2={q.x} y2={q.y}
+                stroke={col} strokeWidth={2.6} strokeLinecap="round"
+                strokeDasharray="6 8" style={{ animation: "dashFlow 14s linear infinite" }}
+                opacity={0.95} filter="url(#cglow)" />;
+            })}
+          </g>
+        );
+      })}
+
+      {/* nodes */}
+      {RINGS.map((ring) => ring.findings.map((f) => {
+        const p = P(f.id);
+        if (!p) return null;
+        const isActive = activeFindings.has(f.id);
+        const isSupp = suppressed.has(f.id);
+        const isPicked = picked === f.id;
+        const col = SEV_COLOR[f.sev];
+        const baseOp = isSupp ? 0.14 : (isActive ? 1 : 0.42);
+        return (
+          <g key={f.id} transform={`translate(${p.x},${p.y})`}
+             onClick={() => onPick && onPick(f.id)}
+             style={{ cursor: "pointer", opacity: baseOp, transition: "opacity .4s ease" }}>
+            {isActive && !isSupp && (
+              <circle r={18} fill={col} opacity={0.22}>
+                <animate attributeName="r" values="14;26;14" dur="2.4s" repeatCount="indefinite" />
+                <animate attributeName="opacity" values="0.28;0.05;0.28" dur="2.4s" repeatCount="indefinite" />
+              </circle>
+            )}
+            <circle r={isActive ? 11 : 7} fill={isSupp ? "#3a4252" : col}
+              filter={isActive && !isSupp ? "url(#cglow)" : "none"} />
+            {isPicked && <circle r={16} fill="none" stroke="#fff" strokeWidth="2" />}
+            <circle r={isActive ? 4 : 3} fill={isSupp ? "#5a6478" : "#0b0e14"} opacity={isActive?0.0:0.0} />
+          </g>
+        );
+      }))}
+
+      {/* core: the agent */}
+      <circle cx={C} cy={C} r={34} fill="url(#cCore)" />
+      <circle cx={C} cy={C} r={13} fill="var(--hot-2)" />
+      <circle cx={C} cy={C} r={13} fill="none" stroke="#1a0a04" strokeWidth={2.5} />
+    </svg>
+  );
+}
+
+Object.assign(window, { RadiusViz, Constellation, SEV_COLOR, useLayout });
+
+  </script>
+  <script type="text/babel">
+/* narrative.jsx — the cinematic scrollytelling intro (Acts 1-3) */
+const { useState: useStateN } = React;
+
+/* progress (0..1) of an element scrolling through the viewport */
+function useScrollProgress(ref) {
+  const [p, setP] = React.useState(0);
+  React.useEffect(() => {
+    let raf = null;
+    const onScroll = () => {
+      if (raf) return;
+      raf = requestAnimationFrame(() => {
+        raf = null;
+        const el = ref.current; if (!el) return;
+        const rect = el.getBoundingClientRect();
+        const vh = window.innerHeight;
+        // 0 when top hits top of viewport, 1 when bottom reaches bottom
+        const total = rect.height - vh;
+        const scrolled = -rect.top;
+        setP(Math.max(0, Math.min(1, scrolled / Math.max(1, total))));
+      });
+    };
+    onScroll();
+    window.addEventListener("scroll", onScroll, { passive: true });
+    window.addEventListener("resize", onScroll);
+    return () => { window.removeEventListener("scroll", onScroll); window.removeEventListener("resize", onScroll); };
+  }, [ref]);
+  return p;
+}
+
+/* fade-in when scrolled into view */
+function Reveal({ children, className, style, delay = 0 }) {
+  const ref = React.useRef(null);
+  const [seen, setSeen] = React.useState(false);
+  React.useEffect(() => {
+    const io = new IntersectionObserver(([e]) => { if (e.isIntersecting) setSeen(true); }, { threshold: 0.25 });
+    if (ref.current) io.observe(ref.current);
+    return () => io.disconnect();
+  }, []);
+  return (
+    <div ref={ref} className={className}
+      style={{ ...style, opacity: seen ? 1 : 0, transform: seen ? "translateY(0)" : "translateY(24px)",
+        transition: `opacity .8s ease ${delay}s, transform .8s ease ${delay}s` }}>
+      {children}
     </div>
-    <div class="meta" id="meta"></div>
-  </header>
+  );
+}
 
-  <div class="grid-stats" id="stats"></div>
+const sceneWrap = { minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center",
+  justifyContent: "center", padding: "0 24px", position: "relative" };
 
-  <div class="panel">
-    <h2>Reachable surface</h2>
-    <div class="hint">credentials, identities & routes reachable from this process — hover a node</div>
-    <div class="radial">
-      <div id="radial"></div>
-      <div class="detail" id="detail">
-        <div class="dt">select a node</div>
-        <div class="dtitle">Hover the map</div>
-        <div class="dsum">Each node is a reachable credential store, identity, repo, or egress route. Distance from the core reflects severity.</div>
+/* ---------- Act 0: hook ---------- */
+function Hook() {
+  return (
+    <section style={{ ...sceneWrap, minHeight: "100vh" }}>
+      <div style={{ position: "relative", width: 120, height: 120, marginBottom: 48 }}>
+        <div style={{ position: "absolute", inset: 0, borderRadius: "50%", border: "1px solid var(--hot)",
+          animation: "pulseRing 3s ease-out infinite" }} />
+        <div style={{ position: "absolute", inset: 0, borderRadius: "50%", border: "1px solid var(--hot)",
+          animation: "pulseRing 3s ease-out infinite 1.5s" }} />
+        <div style={{ position: "absolute", inset: "44px", borderRadius: "50%", background: "var(--hot-2)",
+          boxShadow: "var(--glow-hot)" }} />
+      </div>
+      <div className="mono" style={{ color: "var(--txt-dim)", letterSpacing: 4, fontSize: 12, textTransform: "uppercase", marginBottom: 24 }}>
+        blastradius
+      </div>
+      <h1 style={{ fontSize: "clamp(40px, 7vw, 92px)", fontWeight: 600, lineHeight: 1.02, margin: 0,
+        textAlign: "center", letterSpacing: "-0.02em", maxWidth: 1000 }}>
+        You gave it<br />one&nbsp;small&nbsp;task.
+      </h1>
+      <p style={{ color: "var(--txt-mid)", fontSize: "clamp(16px,2vw,21px)", maxWidth: 560, textAlign: "center",
+        marginTop: 28, lineHeight: 1.5 }}>
+        A coding agent. A clean checkout. A few files to touch.
+        It feels small, and contained. Let's see how far it can actually reach.
+      </p>
+      <div style={{ position: "absolute", bottom: 36, display: "flex", flexDirection: "column", alignItems: "center", gap: 8,
+        color: "var(--txt-dim)", animation: "breathe 2.4s ease-in-out infinite" }}>
+        <span className="mono" style={{ fontSize: 11, letterSpacing: 2 }}>SCROLL</span>
+        <span style={{ fontSize: 20 }}>↓</span>
+      </div>
+    </section>
+  );
+}
+
+/* ---------- Act 1: the calm worktree ---------- */
+function CalmScene() {
+  return (
+    <section style={sceneWrap}>
+      <Reveal style={{ textAlign: "center", maxWidth: 880 }}>
+        <div className="mono" style={{ color: "var(--safe)", letterSpacing: 3, fontSize: 12, marginBottom: 20 }}>
+          ✓ ISOLATED WORKTREE
+        </div>
+        <h2 style={{ fontSize: "clamp(28px,4.4vw,52px)", fontWeight: 600, margin: 0, lineHeight: 1.08, letterSpacing: "-0.02em" }}>
+          It runs in its own directory.<br />Looks contained.
+        </h2>
+        <div style={{ margin: "48px auto 0", maxWidth: 420, position: "relative" }}>
+          <div style={{ border: "1px solid rgba(46,230,166,.4)", borderRadius: 16, padding: "30px 26px",
+            background: "linear-gradient(180deg, rgba(46,230,166,.05), transparent)", boxShadow: "var(--glow-safe)" }}>
+            <div className="mono" style={{ fontSize: 13, color: "var(--txt-mid)", textAlign: "left", lineHeight: 1.9 }}>
+              <div style={{ color: "var(--safe)" }}>~/code/app/.worktrees/task-481</div>
+              <div>├─ src/</div>
+              <div>├─ package.json</div>
+              <div>└─ <span style={{ color: "var(--txt)" }}>agent</span> <span style={{ color: "var(--txt-dim)" }}>// scoped to this folder, right?</span></div>
+            </div>
+          </div>
+        </div>
+        <p style={{ color: "var(--txt-mid)", fontSize: 18, marginTop: 36, lineHeight: 1.55 }}>
+          A worktree changes the working directory. <strong style={{ color: "var(--txt)" }}>And nothing else.</strong>
+        </p>
+      </Reveal>
+    </section>
+  );
+}
+
+/* ---------- Act 2: the reveal ---------- */
+function RevealScene() {
+  return (
+    <section style={{ ...sceneWrap, minHeight: "92vh" }}>
+      <Reveal style={{ textAlign: "center", maxWidth: 980 }}>
+        <h2 style={{ fontSize: "clamp(34px,6vw,84px)", fontWeight: 700, margin: 0, lineHeight: 1.0, letterSpacing: "-0.03em" }}>
+          But the agent<br />runs <span style={{ color: "var(--hot)" }}>as you.</span>
+        </h2>
+        <p style={{ color: "var(--txt-mid)", fontSize: "clamp(17px,2vw,22px)", maxWidth: 660, margin: "32px auto 0", lineHeight: 1.55 }}>
+          Same user. Same shell. Same keys. The moment it starts, it inherits every
+          credential, identity, and route your account already holds — far past the folder it's "in."
+        </p>
+        <div className="mono" style={{ color: "var(--txt-dim)", fontSize: 13, marginTop: 40, letterSpacing: 2 }}>
+          here is everything within reach ↓
+        </div>
+      </Reveal>
+    </section>
+  );
+}
+
+/* ---------- Act 3: the expanding blast radius (sticky, scroll-driven) ---------- */
+const RING_COPY = [
+  { k: "shell",     t: "The shell it was handed", d: "Secret-named env vars, .env keys, shell history — already loaded before the first prompt." },
+  { k: "identity",  t: "Your identity",            d: "SSH private keys, a live ssh-agent, GitHub auth, the git credential store. The keys that say you are you." },
+  { k: "cloud",     t: "Your cloud",               d: "AWS profiles mounted into the shell. Provider identity, no extra step required." },
+  { k: "neighbors", t: "Every neighboring repo",   d: "23 sibling repos on disk — 7 of them carrying their own secrets. The task was one folder; the reach is the whole workspace." },
+  { k: "network",   t: "The open network",         d: "Outbound egress works. A push is likely to be accepted. Data has somewhere to go; code has somewhere to land." },
+  { k: "host",      t: "The whole machine",        d: "Docker group to root. Process memory. Browser sessions. Past the repo, past the cloud — the box itself." },
+];
+
+function RadiusScene({ onEnter }) {
+  const ref = React.useRef(null);
+  const p = useScrollProgress(ref);
+  const revealed = p * 6.2;
+  const activeIdx = Math.max(0, Math.min(5, Math.floor(revealed - 0.15)));
+  const BR = window.BR;
+  const counts = BR.counts();
+
+  return (
+    <section ref={ref} style={{ height: "560vh", position: "relative" }}>
+      <div style={{ position: "sticky", top: 0, height: "100vh", display: "grid",
+        gridTemplateColumns: "minmax(0,1fr) minmax(340px, 440px)", alignItems: "center", overflow: "hidden" }}>
+
+        {/* left: the radius */}
+        <div style={{ position: "relative", height: "100%", minHeight: 0 }}>
+          <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <div style={{ width: "min(86vh, 100%)", aspectRatio: "1", maxWidth: 820 }}>
+              <RadiusViz revealed={revealed} />
+            </div>
+          </div>
+          {/* center label */}
+          <div style={{ position: "absolute", left: "50%", top: "50%", transform: "translate(-50%,calc(-50% + 44px))",
+            textAlign: "center", pointerEvents: "none" }}>
+            <div className="mono" style={{ fontSize: 12, color: "#1a0a04", fontWeight: 700, background: "var(--hot-2)",
+              padding: "2px 8px", borderRadius: 5, letterSpacing: 1 }}>YOU</div>
+          </div>
+        </div>
+
+        {/* right: stepped captions */}
+        <div style={{ padding: "0 clamp(24px,4vw,64px)", position: "relative" }}>
+          <div className="mono" style={{ color: "var(--txt-dim)", fontSize: 12, letterSpacing: 2, marginBottom: 18 }}>
+            THE REACHABLE SURFACE — <span className="sev-exposed">{counts.exposed} exposed</span> · <span className="sev-notable">{counts.notable} notable</span>
+          </div>
+          <div style={{ position: "relative", minHeight: 220 }}>
+            {RING_COPY.map((rc, i) => {
+              const on = activeIdx === i;
+              return (
+                <div key={rc.k} style={{ position: on ? "relative" : "absolute", inset: on ? "auto" : 0,
+                  opacity: on ? 1 : 0, transform: on ? "translateY(0)" : "translateY(14px)",
+                  transition: "opacity .45s ease, transform .45s ease", pointerEvents: "none" }}>
+                  <div className="mono" style={{ color: "var(--hot)", fontSize: 13, marginBottom: 10 }}>
+                    {String(i + 1).padStart(2, "0")} / 06
+                  </div>
+                  <h3 style={{ fontSize: "clamp(26px,3vw,40px)", fontWeight: 600, margin: "0 0 16px", lineHeight: 1.08, letterSpacing: "-0.02em" }}>
+                    {rc.t}
+                  </h3>
+                  <p style={{ color: "var(--txt-mid)", fontSize: 17, lineHeight: 1.55, margin: 0, maxWidth: 420 }}>{rc.d}</p>
+                  <div style={{ marginTop: 22, display: "flex", flexWrap: "wrap", gap: 8 }}>
+                    {((BR.LIVE_RINGS[i] || BR.RINGS[i]).findings).map((f) => (
+                      <span key={f.id} className="mono" style={{ fontSize: 12, padding: "5px 10px", borderRadius: 7,
+                        border: `1px solid ${SEV_COLOR[f.sev]}`, color: SEV_COLOR[f.sev],
+                        background: "rgba(255,255,255,0.02)" }}>
+                        {f.title} · {f.metric}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* progress rail */}
+          <div style={{ display: "flex", gap: 6, marginTop: 40 }}>
+            {RING_COPY.map((_, i) => (
+              <div key={i} style={{ height: 3, flex: 1, borderRadius: 2,
+                background: i <= activeIdx ? "var(--hot)" : "rgba(255,255,255,0.1)", transition: "background .3s ease" }} />
+            ))}
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+/* ---------- bridge into the dashboard ---------- */
+function Bridge({ onEnter }) {
+  return (
+    <section style={{ ...sceneWrap, minHeight: "96vh" }}>
+      <Reveal style={{ textAlign: "center", maxWidth: 900 }}>
+        <div className="mono" style={{ color: "var(--txt-dim)", letterSpacing: 2, fontSize: 12, marginBottom: 20 }}>
+          THAT NEVER CHANGES BETWEEN SESSIONS
+        </div>
+        <h2 style={{ fontSize: "clamp(30px,5vw,64px)", fontWeight: 600, margin: 0, lineHeight: 1.05, letterSpacing: "-0.02em" }}>
+          The real question isn't<br />what it <em style={{ fontStyle: "normal", color: "var(--txt-dim)" }}>can</em> reach.
+          <br />It's what it <span style={{ color: "var(--hot)" }}>actually touches.</span>
+        </h2>
+        <p style={{ color: "var(--txt-mid)", fontSize: 19, margin: "30px auto 40px", maxWidth: 600, lineHeight: 1.55 }}>
+          One session reads two files and runs the tests. Another quietly chains a credential,
+          an open route, and a deploy file into something far worse. Same machine. Same reach.
+          Watch the difference.
+        </p>
+        <button className="btn btn-hot" style={{ fontSize: 16, padding: "14px 28px" }} onClick={onEnter}>
+          Open the session blast-radius score →
+        </button>
+      </Reveal>
+    </section>
+  );
+}
+
+function Narrative({ onEnter }) {
+  return (
+    <div>
+      <Hook />
+      <CalmScene />
+      <RevealScene />
+      <RadiusScene />
+      <Bridge onEnter={onEnter} />
+    </div>
+  );
+}
+
+Object.assign(window, { Narrative, useScrollProgress, Reveal });
+
+  </script>
+  <script type="text/babel">
+/* dashboard.jsx — the interactive session blast-radius score (Acts 4-5) */
+
+/* §23/§24 are FROZEN ILLUSTRATIVE FIXTURES — no Rust engine backs them. */
+const ILLUSTRATIVE_NOTE = "illustrative — post-MVP, not from your scan";
+
+function IllustrativeBadge({ style }) {
+  return (
+    <span className="mono" style={{ fontSize: 10, fontWeight: 600, color: "var(--info)",
+      border: "1px solid var(--info)", padding: "2px 8px", borderRadius: 5, letterSpacing: 0.5,
+      whiteSpace: "nowrap", ...style }}>
+      {ILLUSTRATIVE_NOTE}
+    </span>
+  );
+}
+
+const LEVEL_COLOR = { low: "var(--safe)", medium: "var(--warn)", high: "var(--hot)", critical: "var(--crit)" };
+const LEVEL_LABEL = { low: "LOW", medium: "MEDIUM", high: "HIGH", critical: "CRITICAL" };
+const DECISION = {
+  allow:         { t: "ALLOW",          c: "var(--safe)" },
+  require_review:{ t: "REQUIRE REVIEW", c: "var(--warn)" },
+  block:         { t: "BLOCK",          c: "var(--crit)" },
+};
+
+/* cumulative score after each played event (drama-tuned) */
+const CUM = { risky: [18, 24, 49, 64, 89, 96], benign: [4, 6, 12, 12, 12] };
+/* which combos become active after step N (1-indexed event count) */
+const COMBO_AT = { production_deployment_path: 3, exfiltration_path: 4, source_control_mutation_path: 6, high_review_risk: 6 };
+
+/* ---------- radial score gauge ---------- */
+function ScoreGauge({ score, level }) {
+  const R = 92, CX = 110, CY = 110, START = 135, SWEEP = 270;
+  const polar = (ang, r) => [CX + r * Math.cos(ang * Math.PI / 180), CY + r * Math.sin(ang * Math.PI / 180)];
+  const arc = (a0, a1, r) => {
+    const [x0, y0] = polar(a0, r), [x1, y1] = polar(a1, r);
+    const large = (a1 - a0) > 180 ? 1 : 0;
+    return `M ${x0} ${y0} A ${r} ${r} 0 ${large} 1 ${x1} ${y1}`;
+  };
+  const valAng = START + SWEEP * (score / 100);
+  const col = LEVEL_COLOR[level];
+  return (
+    <svg viewBox="0 0 220 220" style={{ width: "100%", maxWidth: 240, display: "block", margin: "0 auto" }}>
+      <path d={arc(START, START + SWEEP, R)} fill="none" stroke="rgba(255,255,255,0.08)" strokeWidth="14" strokeLinecap="round" />
+      {/* zone ticks */}
+      {[25, 50, 75].map((z) => {
+        const a = START + SWEEP * (z / 100);
+        const [x0, y0] = polar(a, R - 9), [x1, y1] = polar(a, R + 9);
+        return <line key={z} x1={x0} y1={y0} x2={x1} y2={y1} stroke="rgba(255,255,255,0.16)" strokeWidth="2" />;
+      })}
+      {score > 0 && (
+        <path d={arc(START, valAng, R)} fill="none" stroke={col} strokeWidth="14" strokeLinecap="round"
+          style={{ transition: "all .6s cubic-bezier(.3,1,.4,1)", filter: `drop-shadow(0 0 8px ${col})` }} />
+      )}
+      <text x="110" y="104" textAnchor="middle" fontFamily="var(--mono)" fontSize="52" fontWeight="700" fill={col}
+        style={{ transition: "fill .4s" }}>{score}</text>
+      <text x="110" y="132" textAnchor="middle" fontFamily="var(--mono)" fontSize="13" fill="var(--txt-dim)" letterSpacing="2">/ 100</text>
+      <text x="110" y="166" textAnchor="middle" fontFamily="var(--sans)" fontSize="15" fontWeight="700" fill={col} letterSpacing="2"
+        style={{ transition: "fill .4s" }}>{LEVEL_LABEL[level]}</text>
+    </svg>
+  );
+}
+
+/* ---------- session timeline ---------- */
+const EVENT_ICON = { fileRead: "◧", fileWrite: "✎", shell: "❯", network: "⇅", approval: "✓" };
+function Timeline({ session, playStep, onJump }) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+      {session.events.map((e, i) => {
+        const played = i < playStep;
+        const isLast = i === playStep - 1;
+        const hot = e.hot && played;
+        return (
+          <div key={i} onClick={() => onJump(i + 1)}
+            style={{ display: "grid", gridTemplateColumns: "26px 1fr auto", alignItems: "center", gap: 12,
+              padding: "9px 12px", borderRadius: 9, cursor: "pointer",
+              background: isLast ? "rgba(255,91,53,.10)" : "transparent",
+              border: `1px solid ${isLast ? "rgba(255,91,53,.3)" : "transparent"}`,
+              opacity: played ? 1 : 0.32, transition: "all .35s ease" }}>
+            <span className="mono" style={{ fontSize: 15, color: hot ? "var(--hot)" : "var(--txt-dim)", textAlign: "center" }}>
+              {EVENT_ICON[e.t]}
+            </span>
+            <div style={{ minWidth: 0 }}>
+              <div className="mono" style={{ fontSize: 13, color: hot ? "var(--txt)" : "var(--txt-mid)",
+                whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                <span style={{ color: "var(--txt-dim)" }}>{e.title}&nbsp;</span>{e.arg}
+              </div>
+              {e.note && played && <div className="mono" style={{ fontSize: 11, color: "var(--safe-deep)", marginTop: 2 }}>↳ {e.note}</div>}
+            </div>
+            {e.weight > 0 && played
+              ? <span className="mono" style={{ fontSize: 12, color: "var(--hot)", fontWeight: 700 }}>+{e.weight}</span>
+              : <span className="mono" style={{ fontSize: 12, color: "var(--txt-dim)" }}>{played ? "—" : ""}</span>}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/* ---------- toxic combinations ---------- */
+function ToxicPanel({ combos, picked, onPick }) {
+  if (combos.length === 0) {
+    return <div className="mono" style={{ fontSize: 13, color: "var(--txt-dim)", padding: "18px 4px", lineHeight: 1.6 }}>
+      No toxic combinations activated. Reachable authority stayed in the denominator — nothing chained.
+    </div>;
+  }
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      {combos.map((c) => {
+        const col = c.sev === "critical" ? "var(--crit)" : "var(--hot)";
+        const sel = picked === c.name;
+        return (
+          <div key={c.name} onClick={() => onPick(sel ? null : c.name)}
+            style={{ border: `1px solid ${sel ? col : "var(--line-2)"}`, borderRadius: 12, padding: "14px 16px",
+              background: sel ? "rgba(255,61,87,.07)" : "var(--surface)", cursor: "pointer", transition: "all .2s",
+              animation: "fadeUp .5s ease" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+              <span style={{ fontWeight: 600, fontSize: 15 }}>{c.title}</span>
+              <span className="mono" style={{ fontSize: 10, fontWeight: 700, color: col, border: `1px solid ${col}`,
+                padding: "2px 7px", borderRadius: 5, letterSpacing: 1 }}>{c.sev.toUpperCase()}</span>
+            </div>
+            <p style={{ color: "var(--txt-mid)", fontSize: 13, lineHeight: 1.5, margin: "8px 0 0" }}>{c.derived}</p>
+            {sel && (
+              <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 5, borderTop: "1px solid var(--line)", paddingTop: 12 }}>
+                {c.evidence.map((ev, i) => (
+                  <div key={i} className="mono" style={{ fontSize: 12, color: "var(--txt-mid)" }}>{ev}</div>
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/* ---------- containment simulator ---------- */
+function Containment({ active, toggle, sessionId }) {
+  const BR = window.BR;
+  const sim = BR.simulate(active);
+  const enabled = sessionId === "risky";
+  const baseline = 96;
+  // Each control's per-button number is the SAME stacked-ladder delta the
+  // simulator applies (BR.simulate sums LADDER step.delta), so the label always
+  // equals the score change when the control is toggled.
+  const ladderDelta = {};
+  BR.LADDER.forEach((s) => { if (s.control) ladderDelta[s.control] = s.delta; });
+  if (!enabled) {
+    return (
+      <div>
+        <div className="mono" style={{ fontSize: 11, color: "var(--txt-dim)", letterSpacing: 2, marginBottom: 12 }}>BLAST RADIUS UNDER CONTAINMENT</div>
+        <p style={{ fontSize: 13.5, color: "var(--txt-mid)", lineHeight: 1.6, margin: 0 }}>
+          This session is already low-risk — there's almost nothing to contain. Load the
+          <span style={{ color: "var(--crit)", fontWeight: 600 }}> risky session</span> to see each control
+          peel points off the same score.
+        </p>
+      </div>
+    );
+  }
+  return (
+    <div>
+      <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 14 }}>
+        <div>
+          <div className="mono" style={{ fontSize: 11, color: "var(--txt-dim)", letterSpacing: 2 }}>BLAST RADIUS UNDER CONTAINMENT</div>
+        </div>
+        <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+          <span className="mono" style={{ fontSize: 13, color: "var(--txt-dim)", textDecoration: "line-through" }}>{baseline}</span>
+          <span style={{ color: "var(--txt-dim)" }}>→</span>
+          <span className="mono" style={{ fontSize: 30, fontWeight: 700, color: LEVEL_COLOR[sim.level], transition: "color .3s" }}>{sim.score}</span>
+        </div>
+      </div>
+
+      {/* descending bar */}
+      <div style={{ height: 8, borderRadius: 5, background: "rgba(255,255,255,.07)", overflow: "hidden", marginBottom: 18 }}>
+        <div style={{ height: "100%", width: `${sim.score}%`, background: LEVEL_COLOR[sim.level],
+          transition: "width .55s cubic-bezier(.3,1,.4,1), background .3s" }} />
+      </div>
+
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        {BR.CONTROLS.map((c) => {
+          const on = active.has(c.id);
+          return (
+            <button key={c.id} onClick={() => toggle(c.id)} disabled={!enabled}
+              style={{ textAlign: "left", display: "grid", gridTemplateColumns: "auto 1fr auto", gap: 12, alignItems: "center",
+                padding: "11px 14px", borderRadius: 10, cursor: enabled ? "pointer" : "default",
+                background: on ? "rgba(46,230,166,.08)" : "var(--surface)",
+                border: `1px solid ${on ? "rgba(46,230,166,.45)" : "var(--line)"}`,
+                opacity: enabled ? 1 : 0.4, transition: "all .2s", fontFamily: "var(--sans)", color: "var(--txt)" }}>
+              <span style={{ width: 34, height: 19, borderRadius: 11, background: on ? "var(--safe)" : "rgba(255,255,255,.14)",
+                position: "relative", transition: "background .2s", flexShrink: 0 }}>
+                <span style={{ position: "absolute", top: 2, left: on ? 17 : 2, width: 15, height: 15, borderRadius: "50%",
+                  background: on ? "#06281e" : "#fff", transition: "left .2s" }} />
+              </span>
+              <span>
+                <span style={{ fontSize: 14, fontWeight: 600 }}>{c.label}</span>
+                <span style={{ display: "block", fontSize: 11.5, color: "var(--txt-dim)", marginTop: 1 }}>{c.cat}</span>
+              </span>
+              <span className="mono" style={{ fontSize: 12, color: on ? "var(--safe)" : "var(--txt-dim)", whiteSpace: "nowrap" }}>
+                −{ladderDelta[c.id] != null ? Math.abs(ladderDelta[c.id]) : c.indep}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+
+      {/* residual */}
+      <div style={{ marginTop: 16, padding: "12px 14px", borderRadius: 10, border: "1px dashed var(--line-2)", background: "rgba(255,255,255,.02)" }}>
+        <div className="mono" style={{ fontSize: 11, color: "var(--txt-dim)", letterSpacing: 1, marginBottom: 6 }}>IRREDUCIBLE RESIDUAL · {BR.RESIDUAL.floor}</div>
+        <div style={{ fontSize: 12.5, color: "var(--txt-mid)", lineHeight: 1.5 }}>{BR.RESIDUAL.reason}</div>
       </div>
     </div>
-  </div>
-
-  <div class="panel" id="aipanel"></div>
-
-  <div class="panel">
-    <h2>Full inventory</h2>
-    <div class="hint">every probe result, value-free</div>
-    <table id="findings"></table>
-  </div>
-
-  <footer id="footer"></footer>
-</div>
-
-<script id="br-data" type="application/json">/*__BR_DATA__*/</script>
-<script>
-const D = JSON.parse(document.getElementById('br-data').textContent);
-const esc = s => String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-const sevClass = s => 'sev-'+s;
-
-// ---- header / meta ----
-document.getElementById('meta').innerHTML =
-  `<b>${esc(D.tool.name)}</b> v${esc(D.tool.version)}<br>${esc(D.platform)}<br>${esc(D.generated)}`;
-const v = D.verdict || 'unknown';
-const sandboxed = v.indexOf('not') === -1 && v !== 'unknown';
-document.getElementById('verdict').innerHTML =
-  `<span class="pill ${sandboxed?'ok':'bad'}"><span class="dot" style="background:${sandboxed?'var(--good)':'var(--exposed)'}"></span>`+
-  `host: ${esc(v)}</span>`;
-
-// ---- stat tiles ----
-const stats = [];
-stats.push(`<div class="stat exposed"><div class="n">${D.stats.exposed}</div><div class="l">exposed</div></div>`);
-stats.push(`<div class="stat notable"><div class="n">${D.stats.notable}</div><div class="l">notable</div></div>`);
-for(const c of D.stats.classes){
-  stats.push(`<div class="stat"><div class="n">${c.count}${c.exposed?` <span class="ex" style="font-size:15px">▲${c.exposed}</span>`:''}</div><div class="l">${esc(c.label)}</div></div>`);
+  );
 }
-document.getElementById('stats').innerHTML = stats.join('');
 
-// ---- radial map ----
-(function(){
-  const reach = D.findings.filter(f=>f.reachable);
-  const W=520,H=520,cx=W/2,cy=H/2;
-  const exposed = reach.filter(f=>f.severity==='exposed');
-  const notable = reach.filter(f=>f.severity==='notable');
-  let svg = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="blast radius map">`;
-  // rings
-  [120,180,235].forEach((r,i)=>{svg+=`<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="var(--border)" stroke-dasharray="2 6"/>`;});
-  const nodes=[];
-  const place=(list,radius)=>{
-    const n=list.length||1;
-    list.forEach((f,i)=>{
-      const a=(-Math.PI/2)+(i/n)*Math.PI*2;
-      const x=cx+Math.cos(a)*radius, y=cy+Math.sin(a)*radius;
-      nodes.push({f,x,y});
-    });
+/* ---------- finding detail popover ---------- */
+function FindingDetail({ id, onClose }) {
+  const f = window.BR.FINDINGS[id];
+  if (!f) return null;
+  const col = SEV_COLOR[f.sev];
+  return (
+    <div style={{ position: "absolute", left: 20, bottom: 20, width: 320, background: "var(--bg-2)",
+      border: `1px solid ${col}`, borderRadius: 14, padding: 18, boxShadow: "0 20px 50px rgba(0,0,0,.6)", zIndex: 30 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+        <div>
+          <div className="mono" style={{ fontSize: 11, color: "var(--txt-dim)" }}>{f.id}</div>
+          <div style={{ fontSize: 17, fontWeight: 600, marginTop: 3 }}>{f.title}</div>
+        </div>
+        <button onClick={onClose} className="btn btn-ghost" style={{ padding: "2px 9px", fontSize: 16 }}>×</button>
+      </div>
+      <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+        <span className="mono" style={{ fontSize: 11, color: col, border: `1px solid ${col}`, padding: "2px 8px", borderRadius: 5 }}>
+          {window.BR.SEV_LABEL[f.sev]}
+        </span>
+        <span className="mono" style={{ fontSize: 12, color: "var(--txt-mid)", padding: "2px 0" }}>{f.metric}</span>
+      </div>
+      <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 4 }}>
+        {f.detail.map((d, i) => <div key={i} className="mono" style={{ fontSize: 12, color: "var(--txt-mid)" }}>· {d}</div>)}
+      </div>
+    </div>
+  );
+}
+
+/* ============================ DASHBOARD ============================ */
+function Dashboard() {
+  const BR = window.BR;
+  const [sessionId, setSessionId] = React.useState("risky");
+  const [playStep, setPlayStep] = React.useState(0);
+  const [playing, setPlaying] = React.useState(false);
+  const [active, setActive] = React.useState(new Set());
+  const [pickedNode, setPickedNode] = React.useState(null);
+  const [pickedCombo, setPickedCombo] = React.useState(null);
+  const session = BR.SESSIONS[sessionId];
+  const total = session.events.length;
+
+  // auto-play on mount / session change
+  React.useEffect(() => {
+    setPlayStep(0); setActive(new Set()); setPickedNode(null); setPickedCombo(null);
+    const start = setTimeout(() => setPlaying(true), 500);
+    return () => clearTimeout(start);
+  }, [sessionId]);
+
+  React.useEffect(() => {
+    if (!playing) return;
+    if (playStep >= total) { setPlaying(false); return; }
+    const id = setTimeout(() => setPlayStep((s) => s + 1), 950);
+    return () => clearTimeout(id);
+  }, [playing, playStep, total]);
+
+  // derived: which combos are active given playStep
+  const activeCombos = session.combos
+    .filter((name) => (COMBO_AT[name] || 99) <= playStep)
+    .map((name) => BR.COMBOS[name]);
+
+  // suppressed findings from active controls (containment)
+  const suppressed = new Set();
+  if (sessionId === "risky") BR.CONTROLS.forEach((c) => { if (active.has(c.id)) c.suppresses.forEach((s) => suppressed.add(s)); });
+
+  // active findings = played events' refs + active combo nodes
+  const activeFindings = new Set();
+  session.events.slice(0, playStep).forEach((e) => { if (e.ref) activeFindings.add(e.ref); });
+  activeCombos.forEach((c) => c.nodes.forEach((n) => activeFindings.add(n)));
+
+  // combos that survive containment (for the constellation paths)
+  const sim = BR.simulate(active);
+  const liveCombos = activeCombos.filter((c) => !c.legs.some((leg) => sim.killed.has(c.name)))
+    .filter((c) => !c.nodes.some((n) => suppressed.has(n)));
+
+  // current score: during play follow CUM; once contained, follow simulator
+  const anyControl = active.size > 0 && sessionId === "risky";
+  const playedScore = playStep === 0 ? 0 : (CUM[sessionId][playStep - 1] || session.score);
+  const curScore = anyControl ? sim.score : playedScore;
+  const curLevel = anyControl ? sim.level : (playStep < total ? BR.levelOf(playedScore) : session.level);
+  const decision = anyControl
+    ? (curScore >= 75 ? "block" : curScore >= 50 ? "require_review" : "allow")
+    : (playStep < total ? "allow" : session.decision);
+
+  const toggle = (id) => setActive((prev) => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
+
+  return (
+    <section style={{ minHeight: "100vh", padding: "20px clamp(16px,3vw,40px) 60px" }}>
+      {/* header */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 16,
+        padding: "8px 0 22px", borderBottom: "1px solid var(--line)", marginBottom: 24 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+          <div style={{ width: 30, height: 30, borderRadius: "50%", background: "radial-gradient(circle, var(--hot-2), var(--hot) 55%, transparent)" }} />
+          <div>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <span className="mono" style={{ fontSize: 15, fontWeight: 700, letterSpacing: 1 }}>blastradius</span>
+              <IllustrativeBadge />
+            </div>
+            <div className="mono" style={{ fontSize: 11, color: "var(--txt-dim)" }}>session blast-radius score</div>
+          </div>
+        </div>
+        <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+          {/* session selector */}
+          <div style={{ display: "flex", background: "var(--surface)", border: "1px solid var(--line-2)", borderRadius: 10, padding: 3 }}>
+            {["benign", "risky"].map((s) => (
+              <button key={s} onClick={() => setSessionId(s)} className="mono"
+                style={{ border: "none", borderRadius: 7, padding: "8px 16px", cursor: "pointer", fontSize: 13, fontWeight: 600,
+                  background: sessionId === s ? (s === "risky" ? "var(--crit)" : "var(--safe)") : "transparent",
+                  color: sessionId === s ? "#0b0e14" : "var(--txt-mid)", transition: "all .18s", letterSpacing: 1 }}>
+                {s === "risky" ? "RISKY SESSION" : "BENIGN SESSION"}
+              </button>
+            ))}
+          </div>
+          <button className="btn" onClick={() => { setPlayStep(0); setActive(new Set()); setTimeout(() => setPlaying(true), 200); }}>
+            ↺ Replay
+          </button>
+        </div>
+      </div>
+
+      {/* session label */}
+      <div style={{ marginBottom: 18 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+          <span className="mono" style={{ fontSize: 12, color: "var(--txt-dim)" }}>session:</span>
+          <span style={{ fontSize: 18, fontWeight: 600 }}>{session.label}</span>
+          <span style={{ color: "var(--txt-dim)", fontSize: 14 }}>— {session.sub}</span>
+        </div>
+      </div>
+
+      {/* main grid */}
+      <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1.55fr) minmax(360px, 1fr)", gap: 24, alignItems: "start" }}>
+
+        {/* LEFT: constellation + timeline */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+          <div style={{ position: "relative", background: "radial-gradient(circle at 50% 45%, #0d111a, #07090d 75%)",
+            border: "1px solid var(--line)", borderRadius: 18, aspectRatio: "1.15", minHeight: 380, overflow: "hidden" }}>
+            <Constellation activeFindings={activeFindings} combos={liveCombos} suppressed={suppressed}
+              picked={pickedNode} onPick={(id) => { setPickedNode(id); setPickedCombo(null); }} />
+            <div style={{ position: "absolute", top: 16, left: 18 }}>
+              <div className="mono" style={{ fontSize: 11, color: "var(--txt-dim)", letterSpacing: 2 }}>REACHABLE SURFACE</div>
+              <div style={{ fontSize: 13, color: "var(--txt-mid)", marginTop: 3 }}>
+                <span style={{ color: "var(--hot)" }}>●</span> touched ·
+                <span style={{ color: "var(--txt-dim)" }}> ○ reachable, untouched</span>
+              </div>
+              <div className="mono" style={{ fontSize: 10.5, color: "var(--txt-dim)", marginTop: 5 }}>
+                sample of ~{window.BR.BREADTH.probes} probes · ~{window.BR.BREADTH.stores} credential stores
+              </div>
+            </div>
+            {pickedNode && <FindingDetail id={pickedNode} onClose={() => setPickedNode(null)} />}
+            <div style={{ position: "absolute", bottom: 14, right: 18, textAlign: "right" }}>
+              <div className="mono" style={{ fontSize: 11, color: "var(--txt-dim)" }}>click any node to inspect</div>
+            </div>
+          </div>
+
+          {/* timeline */}
+          <div style={{ background: "var(--bg-1)", border: "1px solid var(--line)", borderRadius: 16, padding: "16px 16px 18px" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+              <div className="mono" style={{ fontSize: 12, color: "var(--txt-dim)", letterSpacing: 2 }}>SESSION TIMELINE</div>
+              <div className="mono" style={{ fontSize: 12, color: "var(--txt-dim)" }}>{Math.min(playStep, total)} / {total} events</div>
+            </div>
+            <Timeline session={session} playStep={playStep} onJump={(n) => { setPlaying(false); setPlayStep(n); }} />
+          </div>
+        </div>
+
+        {/* RIGHT: score + combos + containment */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+          {/* score card */}
+          <div style={{ background: "var(--bg-1)", border: "1px solid var(--line)", borderRadius: 16, padding: "22px 18px 18px" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6, gap: 8 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+                <span className="mono" style={{ fontSize: 12, color: "var(--txt-dim)", letterSpacing: 2 }}>BLAST-RADIUS SCORE</span>
+                <IllustrativeBadge />
+              </div>
+              <span className="mono" style={{ fontSize: 11, fontWeight: 700, color: DECISION[decision].c,
+                border: `1px solid ${DECISION[decision].c}`, padding: "3px 9px", borderRadius: 6, letterSpacing: 1 }}>
+                {DECISION[decision].t}
+              </span>
+            </div>
+            <ScoreGauge score={curScore} level={curLevel} />
+            <p style={{ fontSize: 13, color: "var(--txt-mid)", lineHeight: 1.55, textAlign: "center", margin: "6px 14px 0" }}>
+              {sessionId === "benign"
+                ? "Enormous ambient reach. Almost none of it touched. The score follows what the agent did — not what it could do."
+                : (anyControl ? "Recomputed under containment — the same session, fewer reachable legs."
+                   : "What's reachable is the denominator. What the agent touched, and how it chains, is the score.")}
+            </p>
+          </div>
+
+          {/* toxic combinations */}
+          <div style={{ background: "var(--bg-1)", border: "1px solid var(--line)", borderRadius: 16, padding: "16px 16px 18px" }}>
+            <div className="mono" style={{ fontSize: 12, color: "var(--txt-dim)", letterSpacing: 2, marginBottom: 12 }}>
+              TOXIC COMBINATIONS {activeCombos.length > 0 && <span style={{ color: "var(--crit)" }}>· {liveCombos.length} active</span>}
+            </div>
+            <ToxicPanel combos={liveCombos} picked={pickedCombo} onPick={(n) => { setPickedCombo(n); setPickedNode(null); }} />
+          </div>
+
+          {/* containment */}
+          <div style={{ background: "var(--bg-1)", border: "1px solid var(--line)", borderRadius: 16, padding: "18px 16px" }}>
+            <Containment active={active} toggle={toggle} sessionId={sessionId} />
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+Object.assign(window, { Dashboard, IllustrativeBadge, ILLUSTRATIVE_NOTE });
+
+  </script>
+  <script type="text/babel">
+/* retro.jsx — §24 AUTO-SLURP + RETRO-HAZARD: "it already happened, and it still matters" */
+
+const AGENT_COLOR = {
+  "claude-code": "#d97757", "codex": "#10a37f", "cursor": "#7aa2ff", "copilot": "#c8a8ff",
+  "opencode": "#f5a623", "antigravity": "#5ad1c0", "factory": "#ff8a5c", "aider": "#9aa4b6",
+};
+
+function StatusPill({ status }) {
+  const map = {
+    still_reachable: { t: "STILL REACHABLE", c: "var(--crit)" },
+    partial:         { t: "PARTIALLY REMEDIATED", c: "var(--warn)" },
+    remediated:      { t: "REMEDIATED SINCE", c: "var(--safe)" },
   };
-  place(exposed,135); place(notable,222);
-  // connectors
-  nodes.forEach(nd=>{
-    const col = nd.f.severity==='exposed'?'var(--exposed)':'var(--notable)';
-    svg+=`<line x1="${cx}" y1="${cy}" x2="${nd.x}" y2="${nd.y}" stroke="${col}" stroke-opacity="0.22"/>`;
-  });
-  // core
-  svg+=`<circle cx="${cx}" cy="${cy}" r="46" fill="#160d12" stroke="var(--exposed)" stroke-opacity="0.5"/>`;
-  svg+=`<circle cx="${cx}" cy="${cy}" r="46" fill="none" stroke="var(--exposed)"><animate attributeName="r" values="46;62;46" dur="3s" repeatCount="indefinite"/><animate attributeName="stroke-opacity" values="0.5;0;0.5" dur="3s" repeatCount="indefinite"/></circle>`;
-  svg+=`<text x="${cx}" y="${cy-4}" text-anchor="middle" fill="#fff" font-size="12" font-family="var(--mono)">agent</text>`;
-  svg+=`<text x="${cx}" y="${cy+12}" text-anchor="middle" fill="var(--muted)" font-size="10" font-family="var(--mono)">runs as you</text>`;
-  // nodes
-  nodes.forEach((nd,i)=>{
-    const col = nd.f.severity==='exposed'?'var(--exposed)':'var(--notable)';
-    const r = nd.f.severity==='exposed'?9:6.5;
-    svg+=`<g class="node" data-i="${i}" tabindex="0">`+
-      `<circle cx="${nd.x}" cy="${nd.y}" r="${r}" fill="${col}" fill-opacity="0.85" stroke="${col}" stroke-width="1.5"/>`+
-      `</g>`;
-  });
-  if(!nodes.length){
-    svg+=`<text x="${cx}" y="${cy+90}" text-anchor="middle" fill="var(--good)" font-size="13" font-family="var(--mono)">no reachable surface 🎉</text>`;
-  }
-  svg+=`</svg>`;
-  document.getElementById('radial').innerHTML=svg;
-  const det=document.getElementById('detail');
-  const show=nd=>{det.innerHTML=`<div class="dt">${esc(nd.f.classLabel)} · ${esc(nd.f.scope)}</div>`+
-    `<div class="dtitle">${esc(nd.f.title)}</div>`+
-    `<span class="sevtag ${sevClass(nd.f.severity)}">${esc(nd.f.severity)}</span>`+
-    `<div class="dsum" style="margin-top:10px">${esc(nd.f.summary)}</div>`;};
-  document.querySelectorAll('.node').forEach(g=>{
-    const nd=nodes[+g.dataset.i];
-    g.addEventListener('mouseenter',()=>show(nd));
-    g.addEventListener('focus',()=>show(nd));
-    g.addEventListener('click',()=>show(nd));
-  });
-})();
+  const m = map[status];
+  return <span className="mono" style={{ fontSize: 10, fontWeight: 700, color: m.c, border: `1px solid ${m.c}`,
+    padding: "2px 8px", borderRadius: 5, letterSpacing: 1, whiteSpace: "nowrap" }}>{m.t}</span>;
+}
 
-// ---- AI scenarios ----
-(function(){
-  const p=document.getElementById('aipanel'); const ai=D.ai||{};
-  if(ai.error){
-    p.innerHTML=`<h2>Attack scenarios</h2><div class="hint">AI analysis</div>`+
-      `<div class="notice err">AI analysis unavailable: ${esc(ai.error)}</div>`;
-    return;
-  }
-  if(!ai.enabled){
-    p.innerHTML=`<h2>Attack scenarios</h2><div class="hint">AI analysis (opt-in)</div>`+
-      `<div class="notice">Re-run with <b>blastradius dashboard --ai</b> to generate attack-path narratives from the reachable surface. This sends the value-free inventory (severities, credential classes, names, counts) to the OpenAI API — never secret values.</div>`;
-    return;
-  }
-  let h=`<h2>Attack scenarios</h2><div class="hint">AI-generated blast-radius narratives · ${esc(ai.model)} · grounded in the reachable surface above</div>`;
-  if(ai.overall) h+=`<div class="notice"><b>Overall:</b> ${esc(ai.overall)}</div>`;
-  for(const s of (ai.scenarios||[])){
-    const sv=(s.severity||'medium').toLowerCase();
-    h+=`<div class="scen s-${sv}">`+
-       `<div class="top"><span class="sevtag ${sevClass(sv)}">${esc(sv)}</span><h3>${esc(s.title)}</h3></div>`+
-       (s.narrative?`<div class="narr">${esc(s.narrative)}</div>`:'');
-    if(s.attack_path&&s.attack_path.length){
-      h+=`<div class="label">attack path</div><div class="chain">`;
-      s.attack_path.forEach((st,i)=>{h+=(i?`<span class="arrow">→</span>`:'')+`<span class="step">${esc(st)}</span>`;});
-      h+=`</div>`;
-    }
-    if(s.reachable_used&&s.reachable_used.length){
-      h+=`<div class="label">relies on</div><div class="chips">`+
-         s.reachable_used.map(r=>`<span class="chip">${esc(r)}</span>`).join('')+`</div>`;
-    }
-    if(s.impact) h+=`<div class="impact"><b>Impact:</b> ${esc(s.impact)}</div>`;
-    if(s.containment&&s.containment.length){
-      h+=`<div class="label">containment</div><ul class="contain">`+
-         s.containment.map(c=>`<li>${esc(c)}</li>`).join('')+`</ul>`;
-    }
-    h+=`</div>`;
-  }
-  p.innerHTML=h;
-})();
+function HazardCard({ hz, res, dead }) {
+  const BR = window.BR;
+  const combo = BR.COMBOS[hz.combo];
+  const acol = AGENT_COLOR[hz.agent] || "var(--txt-mid)";
+  const sevCol = hz.sev === "critical" ? "var(--crit)" : "var(--hot)";
+  const live = res.status === "still_reachable";
+  return (
+    <div style={{ border: `1px solid ${live ? sevCol : "var(--line)"}`, borderRadius: 14,
+      padding: "16px 18px", background: live ? "rgba(255,61,87,.05)" : "rgba(255,255,255,.02)",
+      opacity: live ? 1 : 0.62, transition: "all .4s ease" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <span style={{ width: 9, height: 9, borderRadius: "50%", background: acol, flexShrink: 0 }} />
+          <span className="mono" style={{ fontSize: 12, color: acol, fontWeight: 600 }}>{hz.agent}</span>
+          <span className="mono" style={{ fontSize: 12, color: "var(--txt-dim)" }}>· {hz.age}</span>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <StatusPill status={res.status} />
+          <span className="mono" style={{ fontSize: 20, fontWeight: 700, color: live ? sevCol : "var(--txt-dim)" }}>{res.realized}</span>
+        </div>
+      </div>
 
-// ---- inventory table ----
-(function(){
-  const rows=[]; let last=null;
-  const order={exposed:0,notable:1,info:2};
-  const fs=[...D.findings].sort((a,b)=>(a.classLabel>b.classLabel?1:a.classLabel<b.classLabel?-1:0)||(order[a.severity]-order[b.severity]));
-  for(const f of fs){
-    if(f.classLabel!==last){rows.push(`<tr><td class="cls" colspan="3">${esc(f.classLabel)}</td></tr>`);last=f.classLabel;}
-    rows.push(`<tr class="f"><td class="sevcell"><span class="sevtag ${sevClass(f.severity)}">${esc(f.severity)}</span></td>`+
-      `<td><div class="ftitle">${esc(f.title)}</div><div class="fsum">${esc(f.summary)}</div></td>`+
-      `<td class="confcell">${esc(f.confidence)}</td></tr>`);
-  }
-  document.getElementById('findings').innerHTML=rows.join('');
-})();
+      <div style={{ marginTop: 12, fontSize: 16, fontWeight: 600 }}>{combo.title}</div>
+      <p style={{ color: "var(--txt-mid)", fontSize: 13.5, lineHeight: 1.5, margin: "6px 0 0" }}>{hz.summary}</p>
 
-document.getElementById('footer').innerHTML =
-  `local only · no telemetry · secret values never leave this machine`+
-  (D.ai&&D.ai.enabled?` · AI sent the value-free inventory to OpenAI (${esc(D.ai.model||'')})`:'');
-</script>
+      {/* observed events */}
+      <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 4, paddingLeft: 12,
+        borderLeft: "2px solid var(--line-2)" }}>
+        {hz.events.map((e, i) => <div key={i} className="mono" style={{ fontSize: 12, color: "var(--txt-mid)" }}>{e}</div>)}
+      </div>
+
+      {/* legs re-resolved against today */}
+      <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 5 }}>
+        <div className="mono" style={{ fontSize: 10.5, color: "var(--txt-dim)", letterSpacing: 1 }}>RE-RESOLVED VS TODAY'S SURFACE</div>
+        {res.legs.map((leg) => (
+          <div key={leg.ref} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span className="mono" style={{ fontSize: 13, color: leg.live ? "var(--crit)" : "var(--safe)", width: 14 }}>
+              {leg.live ? "●" : "○"}
+            </span>
+            <span className="mono" style={{ fontSize: 12, color: leg.live ? "var(--txt)" : "var(--txt-dim)",
+              textDecoration: leg.live ? "none" : "line-through" }}>{leg.ref}</span>
+            <span className="mono" style={{ fontSize: 11, color: leg.live ? "var(--hot)" : "var(--safe)" }}>
+              {leg.live ? "still reachable" : "remediated"}
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ReviewGapCard({ rg }) {
+  const BR = window.BR;
+  const combo = BR.COMBOS[rg.combo];
+  const acol = AGENT_COLOR[rg.agent] || "var(--txt-mid)";
+  return (
+    <div style={{ border: "1px dashed var(--line-2)", borderRadius: 14, padding: "16px 18px", background: "rgba(255,255,255,.02)" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <span style={{ width: 9, height: 9, borderRadius: "50%", background: acol }} />
+          <span className="mono" style={{ fontSize: 12, color: acol, fontWeight: 600 }}>{rg.agent}</span>
+          <span className="mono" style={{ fontSize: 12, color: "var(--txt-dim)" }}>· {rg.age}</span>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <span className="mono" style={{ fontSize: 10, fontWeight: 700, color: "var(--warn)", border: "1px solid var(--warn)",
+            padding: "2px 8px", borderRadius: 5, letterSpacing: 1 }}>REVIEW GAP</span>
+          <div style={{ textAlign: "right" }}>
+            <div className="mono" style={{ fontSize: 20, fontWeight: 700, color: "var(--warn)", lineHeight: 1 }}>{rg.review_score}</div>
+            <div className="mono" style={{ fontSize: 9.5, color: "var(--txt-dim)", letterSpacing: 1 }}>review score</div>
+          </div>
+        </div>
+      </div>
+      <div style={{ marginTop: 10, fontSize: 15, fontWeight: 600 }}>{combo.title}</div>
+      <p style={{ color: "var(--txt-mid)", fontSize: 13, lineHeight: 1.5, margin: "6px 0 10px" }}>{rg.summary}</p>
+      <div style={{ display: "flex", flexDirection: "column", gap: 4, paddingLeft: 12, borderLeft: "2px solid var(--line-2)" }}>
+        {rg.events.map((e, i) => <div key={i} className="mono" style={{ fontSize: 12, color: "var(--txt-mid)" }}>{e}</div>)}
+      </div>
+    </div>
+  );
+}
+
+function RetroSection() {
+  const BR = window.BR;
+  const [dead, setDead] = React.useState(new Set());
+  const toggleDead = (id) => setDead((p) => { const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n; });
+
+  const resolved = BR.HAZARDS.map((hz) => ({ hz, res: BR.retroResolve(hz, dead) }));
+  const liveOnes = resolved.filter((r) => r.res.status === "still_reachable").sort((a, b) => b.res.realized - a.res.realized);
+  const goneOnes = resolved.filter((r) => r.res.status !== "still_reachable").sort((a, b) => b.res.realized - a.res.realized);
+  const totalSessions = BR.AGENTS_DISCOVERED.reduce((s, a) => s + a.sessions, 0);
+
+  return (
+    <section style={{ padding: "100px clamp(16px,3vw,40px) 70px", borderTop: "1px solid var(--line)",
+      background: "linear-gradient(180deg, #090c12, #0a0d14)" }}>
+      <div style={{ maxWidth: 1280, margin: "0 auto" }}>
+
+        {/* framing */}
+        <div style={{ maxWidth: 820 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", marginBottom: 18 }}>
+            <span className="mono" style={{ color: "var(--txt-dim)", letterSpacing: 3, fontSize: 12 }}>
+              AND THE SESSIONS THAT ALREADY RAN
+            </span>
+            <IllustrativeBadge />
+          </div>
+          <h2 style={{ fontSize: "clamp(28px,4.4vw,52px)", fontWeight: 600, margin: 0, lineHeight: 1.08, letterSpacing: "-0.02em" }}>
+            Your agents left transcripts<br />on this machine. We read what<br />they <span style={{ color: "var(--hot)" }}>already did.</span>
+          </h2>
+          <p style={{ color: "var(--txt-mid)", fontSize: 18, lineHeight: 1.55, marginTop: 24 }}>
+            No hooks, no instrumentation — just the session logs Claude Code, Codex, Cursor and the
+            rest leave on disk. The sharper question isn't whether a risky session is <em style={{ fontStyle: "normal", color: "var(--txt)" }}>possible</em>.
+            It's which ones <strong style={{ color: "var(--txt)" }}>already happened — and still matter today.</strong>
+          </p>
+        </div>
+
+        {/* discovery strip */}
+        <div style={{ marginTop: 34, padding: "16px 18px", background: "var(--bg-1)", border: "1px solid var(--line)", borderRadius: 14 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap", marginBottom: 12 }}>
+            <span className="mono" style={{ fontSize: 11, color: "var(--txt-dim)", letterSpacing: 2 }}>
+              DISCOVERED LOCALLY — {totalSessions} SESSIONS ACROSS {BR.AGENTS_DISCOVERED.length} AGENTS
+              <span style={{ color: "var(--txt-dim)", letterSpacing: 0, fontWeight: 400 }}> · extended demo roster</span>
+            </span>
+            <IllustrativeBadge />
+          </div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+            {BR.AGENTS_DISCOVERED.map((a) => (
+              <span key={a.tag} style={{ display: "inline-flex", alignItems: "center", gap: 7, padding: "6px 11px",
+                borderRadius: 8, background: "var(--surface)", border: "1px solid var(--line)" }}>
+                <span style={{ width: 8, height: 8, borderRadius: "50%", background: AGENT_COLOR[a.tag] }} />
+                <span style={{ fontSize: 13, fontWeight: 600 }}>{a.name}</span>
+                <span className="mono" style={{ fontSize: 12, color: "var(--txt-dim)" }}>{a.sessions}</span>
+              </span>
+            ))}
+          </div>
+        </div>
+
+        {/* main: remediation rail + ledgers */}
+        <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1.7fr) minmax(280px,1fr)", gap: 28, marginTop: 36, alignItems: "start" }}>
+
+          {/* ledgers */}
+          <div>
+            <div style={{ display: "flex", alignItems: "baseline", gap: 12, marginBottom: 16 }}>
+              <span style={{ fontSize: 18, fontWeight: 600 }}>Still reachable</span>
+              <span className="mono" style={{ fontSize: 24, fontWeight: 700, color: liveOnes.length ? "var(--crit)" : "var(--safe)",
+                transition: "color .3s" }}>{liveOnes.length}</span>
+              <span className="mono" style={{ fontSize: 13, color: "var(--txt-dim)" }}>of {resolved.length} historical hazards</span>
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              {liveOnes.length === 0 && (
+                <div className="mono" style={{ fontSize: 14, color: "var(--safe)", padding: "20px 4px", lineHeight: 1.6 }}>
+                  Nothing left live. Every historical hazard's required legs have been remediated — each one
+                  dropped into the archive below the moment you cut its reach.
+                </div>
+              )}
+              {liveOnes.map(({ hz, res }) => <HazardCard key={hz.hid} hz={hz} res={res} dead={dead} />)}
+            </div>
+
+            {/* remediated ledger */}
+            {goneOnes.length > 0 && (
+              <div style={{ marginTop: 28 }}>
+                <div className="mono" style={{ fontSize: 12, color: "var(--safe)", letterSpacing: 1, marginBottom: 14 }}>
+                  ✓ ALREADY REMEDIATED (HISTORICAL) — {goneOnes.length}
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                  {goneOnes.map(({ hz, res }) => <HazardCard key={hz.hid} hz={hz} res={res} dead={dead} />)}
+                </div>
+              </div>
+            )}
+
+            {/* review gap lane */}
+            <div style={{ marginTop: 28 }}>
+              <div className="mono" style={{ fontSize: 12, color: "var(--warn)", letterSpacing: 1, marginBottom: 14 }}>
+                REVIEW-CONTROL GAPS — SEPARATE LANE, NO REACHABILITY CLAIM
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                {BR.REVIEW_GAPS.map((rg) => <ReviewGapCard key={rg.hid} rg={rg} />)}
+              </div>
+            </div>
+          </div>
+
+          {/* remediation rail */}
+          <div style={{ position: "sticky", top: 24, display: "flex", flexDirection: "column", gap: 16 }}>
+            <div style={{ background: "var(--bg-1)", border: "1px solid var(--line)", borderRadius: 16, padding: "18px 16px" }}>
+              <div className="mono" style={{ fontSize: 12, color: "var(--txt-dim)", letterSpacing: 2, marginBottom: 6 }}>FIX IT NOW — WATCH IT DROP</div>
+              <p style={{ fontSize: 13, color: "var(--txt-mid)", lineHeight: 1.5, margin: "0 0 14px" }}>
+                Each control removes one reachable leg. A hazard whose required legs are all gone falls
+                out of "still reachable" into the archive. <span style={{ color: "var(--txt)" }}>That asymmetry is the whole point.</span>
+              </p>
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {BR.REMEDIATIONS.map((r) => {
+                  const on = dead.has(r.id);
+                  return (
+                    <button key={r.id} onClick={() => toggleDead(r.id)}
+                      style={{ textAlign: "left", display: "grid", gridTemplateColumns: "auto 1fr", gap: 11, alignItems: "center",
+                        padding: "11px 13px", borderRadius: 10, cursor: "pointer", fontFamily: "var(--sans)", color: "var(--txt)",
+                        background: on ? "rgba(46,230,166,.08)" : "var(--surface)",
+                        border: `1px solid ${on ? "rgba(46,230,166,.45)" : "var(--line)"}`, transition: "all .2s" }}>
+                      <span style={{ width: 34, height: 19, borderRadius: 11, background: on ? "var(--safe)" : "rgba(255,255,255,.14)",
+                        position: "relative", transition: "background .2s", flexShrink: 0 }}>
+                        <span style={{ position: "absolute", top: 2, left: on ? 17 : 2, width: 15, height: 15, borderRadius: "50%",
+                          background: on ? "#06281e" : "#fff", transition: "left .2s" }} />
+                      </span>
+                      <span style={{ fontSize: 13.5, fontWeight: 600 }}>{r.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* honesty disclaimer */}
+            <div style={{ border: "1px solid var(--line-2)", borderRadius: 14, padding: "14px 16px", background: "rgba(90,162,255,.04)" }}>
+              <div className="mono" style={{ fontSize: 11, color: "var(--info)", letterSpacing: 1, marginBottom: 7 }}>REACHABILITY, NOT EXPLOITATION</div>
+              <p style={{ fontSize: 12.5, color: "var(--txt-mid)", lineHeight: 1.55, margin: 0 }}>
+                We are not claiming a secret left the machine. We're showing that a reachable capability
+                <em style={{ fontStyle: "normal", color: "var(--txt)" }}> composed</em> with an action the agent actually took —
+                the path was open then, and it's open now. Values are never read; only paths, command shapes, and counts.
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+Object.assign(window, { RetroSection });
+
+  </script>
+  <script type="text/babel">
+/* app.jsx — orchestrates narrative -> dashboard -> retro-hazard -> close */
+function Outro() {
+  return (
+    <section style={{ minHeight: "70vh", display: "flex", alignItems: "center", justifyContent: "center",
+      padding: "80px 24px", borderTop: "1px solid var(--line)", background: "var(--bg)" }}>
+      <div style={{ textAlign: "center", maxWidth: 860 }}>
+        <div className="mono" style={{ color: "var(--txt-dim)", letterSpacing: 3, fontSize: 12, marginBottom: 26 }}>
+          THE WHOLE STORY, IN ONE LINE
+        </div>
+        <p style={{ fontSize: "clamp(22px,3.2vw,38px)", lineHeight: 1.32, fontWeight: 600, letterSpacing: "-0.02em", margin: 0 }}>
+          Worktrees hide the problem.<br />
+          <span style={{ color: "var(--hot)" }}>blastradius</span> shows the reachable surface,
+          the toxic-combination paths it composes into, and the controls that actually shrink the blast radius.
+        </p>
+        <p style={{ color: "var(--txt-mid)", fontSize: 15, marginTop: 28, lineHeight: 1.6 }}>
+          Reachability, not intent. Clarity, not fear. No secret values, ever.
+        </p>
+      </div>
+    </section>
+  );
+}
+
+function App() {
+  const dashRef = React.useRef(null);
+  const enter = () => {
+    if (dashRef.current) {
+      const top = dashRef.current.getBoundingClientRect().top + window.scrollY;
+      window.scrollTo({ top, behavior: "smooth" });
+    }
+  };
+  return (
+    <div>
+      <Narrative onEnter={enter} />
+      <div ref={dashRef} style={{ borderTop: "1px solid var(--line)",
+        background: "linear-gradient(180deg, #07090d, #090c12)" }}>
+        <Dashboard />
+      </div>
+      <RetroSection />
+      <Outro />
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+
+  </script>
 </body>
-</html>"##;
+</html>
+"##;

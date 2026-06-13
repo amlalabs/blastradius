@@ -24,7 +24,7 @@ use anyhow::Result;
 
 use crate::cli::{Cli, Command, CompareArgs, DashboardArgs, ScanArgs};
 use crate::compare::{diff, worktree};
-use crate::context::{Context, ContextLabel, NetworkPolicy, ScanLimits};
+use crate::context::{Context, ContextLabel, ScanLimits, ScanOptions};
 use crate::report::{ContextReport, RunReport};
 use crate::runner::{default_probes, run_all};
 use crate::severity::Severity;
@@ -75,42 +75,20 @@ fn build_limits(max_depth: Option<usize>, max_repos: Option<usize>, home_wide: b
     limits
 }
 
-#[allow(clippy::too_many_arguments)]
-fn build_network(
-    no_egress: bool,
-    offline: bool,
-    egress_url: Option<String>,
-    env_broad: bool,
-    verbose: bool,
-    check_metadata: bool,
-) -> NetworkPolicy {
-    NetworkPolicy {
-        offline,
-        egress_enabled: !no_egress && !offline,
-        egress_target: egress_url.unwrap_or_else(|| NetworkPolicy::default().egress_target),
-        env_broad,
-        verbose,
-        check_metadata,
-    }
+fn build_options(env_broad: bool, verbose: bool) -> ScanOptions {
+    ScanOptions { env_broad, verbose }
 }
 
 fn run_scan(args: ScanArgs, mode: &str, force_report: bool) -> Result<i32> {
     let limits = build_limits(args.max_depth, args.max_repos, args.home_wide);
-    let network = build_network(
-        args.no_egress,
-        args.offline,
-        args.egress_url.clone(),
-        args.env_broad,
-        args.verbose,
-        args.check_metadata,
-    );
+    let options = build_options(args.env_broad, args.verbose);
 
     let cwd = std::env::current_dir()?;
     let label = if Context::build(
         ContextLabel::Cwd,
         cwd.clone(),
         limits.clone(),
-        network.clone(),
+        options.clone(),
     )
     .repo_root
     .is_some()
@@ -119,13 +97,11 @@ fn run_scan(args: ScanArgs, mode: &str, force_report: bool) -> Result<i32> {
     } else {
         ContextLabel::Cwd
     };
-    let ctx = Context::build(label, cwd, limits, network.clone());
+    let ctx = Context::build(label, cwd, limits, options.clone());
     let findings = run_all(&ctx, &default_probes());
 
     let report = RunReport {
         mode: mode.to_string(),
-        offline: network.offline,
-        egress_enabled: network.egress_enabled,
         timestamp: util::time::now_iso8601(),
         version: VERSION.to_string(),
         platform: ctx.platform,
@@ -170,21 +146,14 @@ fn run_compare(args: CompareArgs) -> Result<i32> {
     });
 
     let limits = build_limits(None, None, false);
-    let network = build_network(
-        args.no_egress,
-        args.offline,
-        args.egress_url.clone(),
-        false,
-        false,
-        args.check_metadata,
-    );
+    let options = ScanOptions::default();
 
     // Repo-root context — discovery_roots are anchored here and SHARED (§12.8).
     let root_ctx = Context::build(
         ContextLabel::RepoRoot,
         main_root.clone(),
         limits.clone(),
-        network.clone(),
+        options.clone(),
     );
     let root_findings = run_all(&root_ctx, &default_probes());
 
@@ -202,8 +171,6 @@ fn run_compare(args: CompareArgs) -> Result<i32> {
 
     let report = RunReport {
         mode: "compare".to_string(),
-        offline: network.offline,
-        egress_enabled: network.egress_enabled,
         timestamp: util::time::now_iso8601(),
         version: VERSION.to_string(),
         platform: root_ctx.platform,
@@ -241,17 +208,10 @@ fn run_dashboard(args: DashboardArgs) -> Result<i32> {
     use crate::analyze::{self, Analysis};
 
     let limits = build_limits(None, None, args.home_wide);
-    let network = build_network(
-        args.no_egress,
-        args.offline,
-        None,
-        false,
-        false,
-        args.check_metadata,
-    );
+    let options = ScanOptions::default();
 
     let cwd = std::env::current_dir()?;
-    let label = if Context::build(ContextLabel::Cwd, cwd.clone(), limits.clone(), network.clone())
+    let label = if Context::build(ContextLabel::Cwd, cwd.clone(), limits.clone(), options.clone())
         .repo_root
         .is_some()
     {
@@ -259,12 +219,12 @@ fn run_dashboard(args: DashboardArgs) -> Result<i32> {
     } else {
         ContextLabel::Cwd
     };
-    let ctx = Context::build(label, cwd, limits, network.clone());
+    let ctx = Context::build(label, cwd, limits, options.clone());
     let findings = run_all(&ctx, &default_probes());
 
     // Optional AI analysis — the ONE thing that sends data off-machine. Opt-in,
     // value-free, with an explicit disclosure of exactly what is transmitted.
-    let analysis: std::result::Result<Option<Analysis>, String> = if args.ai && !args.offline {
+    let analysis: std::result::Result<Option<Analysis>, String> = if args.ai {
         match load_openai_key() {
             Some(key) => {
                 let model = args
@@ -286,16 +246,12 @@ fn run_dashboard(args: DashboardArgs) -> Result<i32> {
                 "no OPENAI_API_KEY found (set it in the environment or ./.env)".to_string(),
             ),
         }
-    } else if args.ai && args.offline {
-        Err("--ai disabled because --offline was set".to_string())
     } else {
         Ok(None)
     };
 
     let report = RunReport {
         mode: "dashboard".to_string(),
-        offline: network.offline,
-        egress_enabled: network.egress_enabled,
         timestamp: util::time::now_iso8601(),
         version: VERSION.to_string(),
         platform: ctx.platform,
@@ -508,16 +464,14 @@ mod tests {
             "scan",
             "--output",
             "/tmp/customer-secret",
-            "--egress-url=token.example:443",
-            "--offline",
+            "--max-depth=3",
             "unexpected-secret",
         ]);
         assert_eq!(
             cmd,
-            "blastradius scan --output [value] --egress-url=[value] --offline [arg]"
+            "blastradius scan --output [value] --max-depth=[value] [arg]"
         );
         assert!(!cmd.contains("customer-secret"));
-        assert!(!cmd.contains("token.example"));
         assert!(!cmd.contains("unexpected-secret"));
     }
 }
@@ -544,15 +498,18 @@ where
 {
     const VALUE_FLAGS: &[&str] = &[
         "--output",
-        "--egress-url",
         "--max-depth",
         "--max-repos",
         "--fail-on",
+        "--bind",
+        "--port",
+        "--model",
     ];
     const COMMANDS: &[&str] = &[
         "scan",
         "compare",
         "report",
+        "dashboard",
         "self-test-redaction",
         "version",
     ];
@@ -633,11 +590,11 @@ pub fn self_test_redaction() -> Result<i32> {
     // strip the value (only the name + length are ever captured).
     env::set_var("OPENAI_API_KEY", &canary);
 
-    // 2. Run a real offline scan against the live (now-seeded) environment.
-    let network = build_network(true, true, None, false, false, false);
+    // 2. Run a real scan against the live (now-seeded) environment.
+    let options = ScanOptions::default();
     let limits = ScanLimits::default();
     let cwd = std::env::current_dir()?;
-    let ctx = Context::build(ContextLabel::Cwd, cwd, limits, network.clone());
+    let ctx = Context::build(ContextLabel::Cwd, cwd, limits, options);
     let findings = run_all(&ctx, &default_probes());
 
     // 3. Add a synthetic finding whose evidence carries known secret SHAPES to
@@ -661,8 +618,6 @@ pub fn self_test_redaction() -> Result<i32> {
 
     let report = RunReport {
         mode: "self-test".to_string(),
-        offline: true,
-        egress_enabled: false,
         timestamp: util::time::now_iso8601(),
         version: VERSION.to_string(),
         platform: ctx.platform,
@@ -677,9 +632,19 @@ pub fn self_test_redaction() -> Result<i32> {
     let term = report::terminal::render(&report);
     let md = report::markdown::render(&report);
     let json = report::json::render(&report);
+    // The dashboard is an additional rendered surface: build its value-free JSON
+    // payload and the full HTML page, then subject it to the same canary-leak +
+    // secret-shape checks as the other renderers.
+    let ai_none: std::result::Result<Option<crate::analyze::Analysis>, String> = Ok(None);
+    let dash = crate::dashboard::render_html(&crate::dashboard::build_data(&report, &ai_none));
 
     let mut failures = Vec::new();
-    for (name, rendered) in [("terminal", &term), ("markdown", &md), ("json", &json)] {
+    for (name, rendered) in [
+        ("terminal", &term),
+        ("markdown", &md),
+        ("json", &json),
+        ("dashboard", &dash),
+    ] {
         if rendered.contains(&canary) {
             failures.push(format!("canary leaked in {name} renderer"));
         }
@@ -691,7 +656,7 @@ pub fn self_test_redaction() -> Result<i32> {
     if failures.is_empty() {
         println!("→ redaction self-test passed");
         println!(
-            "  synthetic secret value was not present in terminal, markdown, or json renderers"
+            "  synthetic secret value was not present in terminal, markdown, json, or dashboard renderers"
         );
         Ok(exit::SUCCESS)
     } else {
@@ -703,8 +668,8 @@ pub fn self_test_redaction() -> Result<i32> {
 }
 
 /// Re-exported for integration tests.
-pub fn scan_context(cwd: &Path, network: NetworkPolicy, limits: ScanLimits) -> ContextReport {
-    let ctx = Context::build(ContextLabel::Cwd, cwd.to_path_buf(), limits, network);
+pub fn scan_context(cwd: &Path, options: ScanOptions, limits: ScanLimits) -> ContextReport {
+    let ctx = Context::build(ContextLabel::Cwd, cwd.to_path_buf(), limits, options);
     let findings = run_all(&ctx, &default_probes());
     ContextReport {
         context: ctx,

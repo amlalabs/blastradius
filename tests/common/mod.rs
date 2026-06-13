@@ -4,7 +4,7 @@
 use std::path::{Path, PathBuf};
 
 use blastradius::context::{
-    Context, ContextLabel, EnvSnapshot, EnvVarMeta, GitContext, NetworkPolicy, Platform, ScanLimits,
+    Context, ContextLabel, EnvSnapshot, EnvVarMeta, GitContext, Platform, ScanLimits, ScanOptions,
 };
 
 /// Build a fully-controlled context for probe tests.
@@ -19,11 +19,7 @@ pub fn ctx_with(home: &Path, cwd: &Path) -> Context {
         env: EnvSnapshot { vars: Vec::new() },
         git: GitContext::default(),
         limits: ScanLimits::default(),
-        network: NetworkPolicy {
-            egress_enabled: false,
-            offline: true,
-            ..NetworkPolicy::default()
-        },
+        options: ScanOptions::default(),
         discovery_roots: Vec::new(),
     }
 }

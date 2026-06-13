@@ -42,8 +42,6 @@ fn malicious_report() -> RunReport {
 
     RunReport {
         mode: "scan\x1b".to_string(),
-        offline: true,
-        egress_enabled: false,
         timestamp: "2026-06-08T12:00:00Z\r".to_string(),
         version: "0.1.0".to_string(),
         platform,
@@ -89,13 +87,10 @@ fn reports_do_not_include_raw_command_arg_values() {
     let status = std::process::Command::new(env!("CARGO_BIN_EXE_blastradius"))
         .args([
             "scan",
-            "--offline",
             "--max-depth",
             "0",
             "--max-repos",
             "0",
-            "--egress-url",
-            "secret-host.example:443",
             "--output",
         ])
         .arg(&out)
@@ -109,10 +104,7 @@ fn reports_do_not_include_raw_command_arg_values() {
     let markdown = std::fs::read_to_string(out.join("blastradius-report.md")).unwrap();
     let json = std::fs::read_to_string(out.join("blastradius-report.json")).unwrap();
 
-    assert!(!markdown.contains("secret-host.example"));
     assert!(!markdown.contains("audit-secret-value"));
-    assert!(!json.contains("secret-host.example"));
     assert!(!json.contains("audit-secret-value"));
-    assert!(markdown.contains("--egress-url [value]"));
     assert!(markdown.contains("--output [value]"));
 }

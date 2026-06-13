@@ -22,15 +22,6 @@ pub fn render(report: &RunReport) -> String {
         "- **command:** {}",
         markdown_code_span(&report.command)
     );
-    let _ = writeln!(
-        out,
-        "- **egress:** {}",
-        if report.egress_enabled {
-            "enabled"
-        } else {
-            "disabled"
-        }
-    );
 
     let _ = writeln!(
         out,

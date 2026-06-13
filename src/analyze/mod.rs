@@ -8,7 +8,10 @@
 //!
 //! ## Privacy contract
 //!
-//! This is the ONE feature that sends anything off-machine, and it is opt-in. It
+//! This is the only feature that sends the findings inventory off-machine, and it
+//! is opt-in. (The scan also always runs the egress + cloud-metadata reachability
+//! probes, and the dashboard page loads UI assets/webfonts from a CDN — but those
+//! carry no findings or secret values.) It
 //! transmits ONLY the value-free inventory (finding ids, classes, severities,
 //! titles, summaries) — the exact same metadata the local report already prints,
 //! and which carries NO secret values by construction (§4.2). Before the request

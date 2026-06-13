@@ -64,8 +64,6 @@ pub fn render(report: &RunReport) -> String {
             "id": null,
             "timestamp": report.timestamp,
             "mode": report.mode,
-            "offline": report.offline,
-            "egress_enabled": report.egress_enabled,
         },
         "contexts": contexts,
         "findings": findings,

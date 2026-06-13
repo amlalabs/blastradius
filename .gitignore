@@ -21,3 +21,11 @@ Thumbs.db
 .idea/
 .vscode/
 *~
+
+# Design bundle — the dashboard page (src/dashboard/page.rs) is GENERATED from
+# .design-bundle/project/* via .design-bundle/gen_page.py, so those sources and
+# the generator stay tracked. Ignore the heavyweight / non-build artifacts:
+.design-bundle/chats/
+.design-bundle/*_workflow.js
+.design-bundle/project/screenshots/
+.design-bundle/project/.thumbnail

@@ -20,8 +20,6 @@ pub struct ContextReport {
 /// The full result of a run, ready to render in any format.
 pub struct RunReport {
     pub mode: String,
-    pub offline: bool,
-    pub egress_enabled: bool,
     pub timestamp: String,
     pub version: String,
     pub platform: Platform,
@@ -72,7 +70,7 @@ blastradius — local reachability audit for coding-agent environments
 Privacy:
   • no telemetry   • no findings leave this machine
   • secret values are never printed
-  • one optional egress check; disable with --no-egress
+  • the scan always runs one outbound TLS reachability check (no data sent)
 ";
 
 /// Shared helper: group a context's findings by class, preserving sort order.

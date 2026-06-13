@@ -65,7 +65,8 @@ other processes' command lines, and reachable localhost datastores.
 timers.
 
 **Egress** — outbound reachability (DNS + TLS), proxy mediation, and
-cloud-metadata reachability (opt-in).
+cloud-metadata reachability (always on; the scan's network checks aren't
+configurable).
 
 The credential-store checks are **spec-driven** (~35 stores): each is a data
 entry, so adding one is a few lines — see `src/probes/registry.rs`. The full
@@ -74,8 +75,12 @@ coverage map is in [docs/claude-code-security-model.md](docs/claude-code-securit
 ## What it never does
 
 - no telemetry · no secret values · no exploit behavior · no repo secret scanning
-- no network except the documented egress probe (one TLS connect; `--no-egress`
-  to disable) **and** the opt-in `dashboard --ai` call (see below)
+- secret values never leave the machine — not in any report, and not in the
+  opt-in `dashboard --ai` request, which carries only the value-free inventory
+- `--ai` is the only feature that sends the value-free findings inventory
+  off-machine; everything else (the egress + cloud-metadata reachability probes
+  the scan always runs, and the dashboard's CDN-loaded UI assets) carries no
+  scan data
 - never writes to repo files, shell/git config, credential stores, or `$HOME`
   by default
 
@@ -86,9 +91,14 @@ blastradius dashboard            # local web dashboard of the reachable surface
 blastradius dashboard --ai       # + AI-generated attack-scenario narratives
 ```
 
-`dashboard` runs a scan and serves a single self-contained page (no external
-assets, works offline) visualizing the reachable surface, severities, and full
-inventory. It binds `0.0.0.0:5321` by default; override with `--bind`/`--port`.
+`dashboard` runs a scan and serves a local web page (value-free, swept): a
+narrative walkthrough of the reachable surface. Its reachable-surface rings and
+tallies are **live from the scan** (severities and the full inventory). The
+per-session blast-radius score and the retro-hazard sections are **illustrative
+post-MVP fixtures** (labeled as such on-page) — there is no session-scoring
+engine in the tree yet. The page loads React/Babel and webfonts from a CDN to
+render (those carry no scan data). It binds `0.0.0.0:5321` by default; override
+with `--bind`/`--port`.
 
 > ⚠ The dashboard has **no authentication** and renders your full reachable-credential
 > inventory, escalation paths, and post-root blast radius. Binding to `0.0.0.0`
@@ -99,26 +109,28 @@ inventory. It binds `0.0.0.0:5321` by default; override with `--bind`/`--port`.
 awareness**, how the *reachable* credentials/identities could be chained — attack
 paths, impact, and containment — grounded only in what the scan found.
 
-This is the **one** feature that sends anything off-machine, and it is opt-in.
-It transmits ONLY the value-free inventory (finding ids, classes, severities,
-titles, summaries — the same metadata the local report prints) and re-runs the
-redaction sweep over the exact bytes before sending; **no secret value, file
-content, or env value is ever transmitted**. The key is read from
+`--ai` is the **only** feature that sends the findings inventory off-machine, and
+it is opt-in. It transmits ONLY the value-free inventory (finding ids, classes,
+severities, titles, summaries — the same metadata the local report prints) and
+re-runs the redaction sweep over the exact bytes before sending; **no secret
+value, file content, or env value is ever transmitted**. (The scan's egress +
+cloud-metadata reachability probes always run but send no findings, and the
+dashboard's CDN-loaded UI assets carry no scan data.) The key is read from
 `OPENAI_API_KEY` (environment or `./.env`) and used only as the bearer token.
 Scenarios are conceptual blast-radius narratives with containment, not exploit
-code. `--offline` disables it.
+code. Omit `--ai` to skip it.
 
 ## Network egress probe
 
-By default, blastradius resolves a well-known hostname and opens a single TLS
-connection to a major always-available anycast endpoint (default `1.1.1.1:443`).
-No HTTP body and no findings, credentials, paths, env vars, repo names,
-hostnames, usernames, or machine identifiers are sent. It reports whether DNS
-resolution and the TLS handshake succeeded, the resolved IP, and latency. Any
-outbound connection necessarily exposes your source IP and a timestamp to the
-destination. Override with `--egress-url HOST:PORT`; URL schemes, paths,
-credentials, and port `0` are rejected. Custom targets are redacted in reports.
-Disable with `--no-egress`/`--offline`.
+Every scan **always** performs one outbound reachability check: it resolves a
+fixed, well-known anycast endpoint (`1.1.1.1:443`) and opens a single TLS
+connection to it. There is no flag to configure or disable this — measuring
+outbound reach is part of the audit. No HTTP body and no findings, credentials,
+paths, env vars, repo names, hostnames, usernames, or machine identifiers are
+sent; it reports only whether DNS resolution and the TLS handshake succeeded, the
+resolved IP, and latency. (Any outbound connection necessarily exposes your
+source IP and a timestamp to the destination.) The scan also probes
+cloud-metadata (169.254.169.254) reachability the same way.
 
 ## Usage
 
@@ -126,12 +138,11 @@ Disable with `--no-egress`/`--offline`.
 blastradius scan                 # run the battery once (default command)
 blastradius scan --report        # also write ./blastradius-report.{md,json}
 blastradius scan --output audit  # write audit/blastradius-report.{md,json}
-blastradius scan --offline       # no network at all
 blastradius scan --verbose       # list env/.env key NAMES (never values)
 blastradius scan --env-broad     # opt-in heuristic env matching (Notable only)
 blastradius compare              # repo-root vs temporary worktree, side by side
 blastradius dashboard            # serve a local web dashboard of the reach
-blastradius dashboard --ai       # + AI attack-scenario narratives (opt-in egress)
+blastradius dashboard --ai       # + AI attack-scenario narratives (opt-in; sends value-free inventory)
 blastradius self-test-redaction  # assert no synthetic secret leaks any renderer
 ```
 
@@ -179,7 +190,6 @@ bubblewrap sandbox does and does not contain, audited against the open-source
 
 ```sh
 cargo test                          # unit + fixture + worktree tests
-cargo test --features network-tests # also exercise the real egress probe
 cargo run -- compare
 ```
 

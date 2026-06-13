@@ -25,18 +25,16 @@ dirs = "5"
 tempfile = "3"
 anyhow = "1"
 ctrlc = "3"
+# TLS for the always-on egress reachability probe (one handshake to 1.1.1.1:443).
 rustls = { version = "0.23", default-features = false, features = ["std", "ring", "tls12"] }
 webpki-roots = "0.26"
 # Opt-in AI analysis (`dashboard --ai`): a small blocking, rustls-based HTTP
-# client. Only ever transmits the value-free finding inventory to OpenAI.
+# client that transmits only the value-free finding inventory to OpenAI — never
+# a secret value.
 ureq = { version = "2", default-features = false, features = ["tls", "json"] }
 
 [dev-dependencies]
 tempfile = "3"
-
-[features]
-# Opt-in integration tests that touch the real network.
-network-tests = []
 
 [profile.release]
 opt-level = "s"

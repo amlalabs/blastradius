@@ -48,11 +48,7 @@ fn compare_ambient_equal_currentrepo_differs_and_cleans_up() {
         ContextLabel::RepoRoot,
         repo.clone(),
         Default::default(),
-        blastradius::context::NetworkPolicy {
-            egress_enabled: false,
-            offline: true,
-            ..Default::default()
-        },
+        blastradius::context::ScanOptions::default(),
     );
     root_ctx.discovery_roots = Vec::new();
     let root_findings = run_all(&root_ctx, &default_probes());

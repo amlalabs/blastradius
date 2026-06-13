@@ -28,19 +28,19 @@ No exploitation, no injection, no staged malice. Every probe is a benign local r
 1. **Live demo — two registers.** For the broad/mid-tier room, lead with `blastradius compare`: the worktree reveal earns attention, then the inventory (reachable creds, secret env vars, sibling repos, lateral `.env`, git auth surface, push-likelihood, egress) is the substance. For the three-to-five fleet operators who are the actual buyer, skip the worktree theater — they know it — and open with inventory breadth + the orchestrator comparison. Either way it opens a concrete conversation about isolation, credential substitution, egress control, and capability boundaries.
 2. **Local self-audit** — `blastradius scan` produces a local report of what a same-user process can reach.
 3. **Pre-adoption check at team scale** — `blastradius scan --report` generates Markdown + JSON to spot common exposure patterns across a team, without collecting secret values.
-4. **Tooling comparison — the buyer's close (post-MVP).** `blastradius matrix --target {bare,worktree,conductor,cmux,ax}` runs the same battery across environments and shows which actually *contain* the reach. "A worktree shares `$HOME`" is obvious; "the orchestrator you're running inherits that and doesn't interpose on creds or egress either" is not — this is the load-bearing claim for fleet operators. Ships after the single-machine diagnostic on timeline, but it's higher-priority to the buyer than the worktree compare.
+4. **Tooling comparison — the buyer's close (post-MVP).** `blastradius compare --compare-ax` (the orchestrator **matrix**, §13.1) runs the same battery across environments — bare, worktree, and the orchestrators the operator runs (Conductor/cmux/ax) — and shows which actually *contain* the reach. "A worktree shares `$HOME`" is obvious; "the orchestrator you're running inherits that and doesn't interpose on creds or egress either" is not — this is the load-bearing claim for fleet operators. Ships after the single-machine diagnostic on timeline, but it's higher-priority to the buyer than the worktree compare.
 
 ---
 
 ## 3. Hard non-goals
 
-**Not an exploit tool.** No privilege escalation, config mutation, prompt injection, executing untrusted repo code, running package scripts, reading secret *values* into output, sending findings anywhere, brute-forcing, probing third-party infra, bypassing branch protection, real or dry-run `git push`, or retrieving cloud-metadata credentials. It only asks: what is reachable? **The §23 session scoring layer preserves this:** it is read-only by default (§4.1) and value-free (§4.2); its single state-changing capability is the **opt-in** PreToolUse `block` decision, which the user must explicitly enable. The scorer never executes session commands, never replays traced actions, and never emits secret values — `file_write` diffs and `mcp_call` inputs are dropped/redacted at ingest, command secret-substrings stripped — and every `SessionReport` passes the same Layer-2 redaction sweep (§4.3) and canary self-test (§4.4) as every other renderer.
+**Not an exploit tool.** No privilege escalation, config mutation, prompt injection, executing untrusted repo code, running package scripts, reading secret *values* into output, sending findings anywhere, brute-forcing, probing third-party infra, bypassing branch protection, real or dry-run `git push`, or retrieving cloud-metadata credentials. It only asks: what is reachable? **The §23 session scoring layer preserves this:** it is read-only by default (§4.1) and value-free (§4.2); its single state-changing capability is the **opt-in** PreToolUse `block` decision, which the user must explicitly enable. The scorer never executes session commands, never replays traced actions, and never emits secret values — `file_write` diffs and `mcp_call` inputs are dropped/redacted at ingest, command secret-substrings stripped — and every `SessionReport` will be required to pass the same Layer-2 redaction sweep (§4.3) and canary self-test (§4.4) as every other renderer (this is the contract for the §23 layer, which is post-MVP and not yet built — §24.0; the current self-test covers the terminal/markdown/json/dashboard renderers only).
 
 **Not a repo secret scanner.** Not TruffleHog/Gitleaks. It does not crawl git history. It focuses on ambient machine authority. It may *count* `.env`/key-like files in nearby repos; it never extracts their values.
 
-**Not a LAN scanner.** No port scanning, no internal enumeration, no probing arbitrary hosts. Default network behavior is exactly one transparent egress reachability check (§13.11), disabled with `--no-egress` or `--offline`.
+**Not a LAN scanner.** No port scanning, no internal enumeration, no probing arbitrary hosts. The network behavior is exactly one transparent egress reachability check plus a single cloud-metadata reachability check (§12.11), both of which always run and send no findings.
 
-**Not telemetry.** No analytics, no report upload, no phone-home, no hidden beacon. The npm wrapper may contact the artifact host (GitHub Releases) on explicit invocation to download the binary; the binary itself sends nothing except the explicit, documented egress probe. The §23 session scoring layer reads agent traces locally and the PreToolUse hook returns its verdict to the agent harness on the same machine — neither uploads traces, scores, or reports anywhere.
+**Not telemetry.** No analytics, no report upload, no phone-home, no hidden beacon. The npm wrapper may contact the artifact host (GitHub Releases) on explicit invocation to download the binary; the binary itself sends no findings or secret values anywhere. Its outbound connections are: the always-on egress reachability probe and cloud-metadata reachability check (§12.11, both send no scan data); when you open the `dashboard`, the browser's fetch of static UI assets/webfonts from a CDN (which carry no scan data); and, only with `--ai`, the value-free findings inventory to the AI provider. The (post-MVP) §23 session scoring layer reads agent traces locally and the PreToolUse hook returns its verdict to the agent harness on the same machine — neither uploads traces, scores, or reports anywhere.
 
 ---
 
@@ -74,30 +74,30 @@ A raw-secret runtime flag is a foot-gun for demos, CI logs, and pasted reports. 
 ```
 BLASTRADIUS_TEST_SECRET=br_test_SHOULD_NOT_LEAK blastradius self-test-redaction
 → redaction self-test passed
-  synthetic secret value was not present in terminal, markdown, json, or session-report renderers
+  synthetic secret value was not present in terminal, markdown, json, or dashboard renderers
 ```
 If raw inspection is ever needed, gate it behind a **compile-time** feature, not a runtime flag.
 
 ### 4.5 Output is local only
-Default stdout. `--report` writes `./blastradius-report.{md,json}`; `--json` / `--markdown` write one format. `--output ./audit` writes reports into `./audit/` and implies both formats when no explicit format flag is provided. Never write outside the requested directory. An existing output directory symlink is rejected. Report files are created private on Unix (`0600`), written through a same-directory temp file, and renamed into place so an existing report-file symlink is replaced rather than followed.
+Default stdout. `--report` writes `./blastradius-report.{md,json}`; `--json` / `--markdown` write one format. `--output ./audit` writes reports into `./audit/` and implies both formats when no explicit format flag is provided. Never write outside the requested directory. An existing output directory symlink is rejected. Report files are created private on Unix (`0600`), written through a same-directory temp file, and renamed into place so an existing report-file symlink is replaced rather than followed. The `dashboard` page may load UI assets and webfonts from a CDN purely for rendering; this does not change the local-only guarantee for findings — no scan data, finding, or secret value is ever transmitted by those asset loads.
 
-### 4.6 Egress probe transparency *(revised — see §13.11 for mechanism)*
+### 4.6 Egress probe transparency *(revised — see §12.11 for mechanism)*
 Document the probe fully in `--help`, `scan --help`, and the README:
 ```
 Network egress probe:
-  By default, blastradius checks outbound reachability by resolving a
-  well-known hostname and opening a single TLS connection to a major,
-  always-available anycast endpoint (default: 1.1.1.1:443). No HTTP body
-  and no findings, credentials, paths, env vars, repo names, hostnames,
-  usernames, or machine identifiers are sent.
+  blastradius checks outbound reachability by resolving a well-known
+  hostname and opening a single TLS connection to a major, always-available
+  anycast endpoint (1.1.1.1:443), and separately makes one fixed TCP connect
+  to the link-local cloud-metadata endpoint. No HTTP body and no findings,
+  credentials, paths, env vars, repo names, hostnames, usernames, or machine
+  identifiers are sent.
 
   It reports whether DNS resolution and the TLS handshake succeeded, the
-  resolved IP, and latency.
+  resolved IP, latency, and whether the metadata endpoint was reachable.
 
   Any outbound connection necessarily exposes your source IP and a timestamp
-  to the destination. Override with --egress-url HOST:PORT (schemes,
-  credentials, paths, and port 0 rejected); custom targets are redacted in
-  reports. Disable with --no-egress or --offline.
+  to the destination. The egress target is fixed; there is no configurable
+  destination and no way to point the probe at an arbitrary host.
 ```
 If an HTTP request is used instead of a bare TLS connect, headers must be boring (`User-Agent: blastradius/<version>`, `Accept: text/plain`) and carry no identifiers.
 
@@ -119,17 +119,17 @@ If an HTTP request is used instead of a bare TLS connect, headers must be boring
 
 Commands (shipped): `scan` (default), `compare`, `report`, `dashboard`, `self-test-redaction`, `version`. Bare `blastradius` ≡ `blastradius scan`. `dashboard [--ai]` is the shipped single-page reachable-surface web UI plus opt-in AI attack-scenario narratives.
 
-Commands (specced, **post-MVP — not yet built**, §23–§24): `score` — the session blast-radius scoring layer (`blastradius score [--baseline baseline.json] [--trace trace.json]`, implicit-live form `blastradius score traces/risky.json`, CI gating `--fail-on-score` reusing exit code 4); the `dashboard` **three-tab session view** (Tabs 2–3) when a trace is supplied; `sessions` / `audit-history` (transcript ingestion + retro-hazard); and a future `session -- <cmd>` live wrap. None of these exist in the tree yet — `src/session/` and a `score` command are design only (verified §24.0).
+Commands (specced, **post-MVP — not yet built**, §23–§24): `score` — the session blast-radius scoring layer (`blastradius score [--baseline baseline.json] [--trace trace.json]`, implicit-live form `blastradius score traces/risky.json`, CI gating `--fail-on-score` reusing exit code 4); the `dashboard` **three-tab session view** (Tabs 2–3) when a trace is supplied; `sessions` / `audit-history` (transcript ingestion + retro-hazard); a future `session -- <cmd>` live wrap; and the orchestrator **matrix** — surfaced as `compare --compare-ax` (§13.1), comparing bare/worktree/Conductor/cmux/ax. None of these exist in the tree yet — `src/session/` and a `score` command are design only (verified §24.0).
 
 **`scan`** — run the battery once against the current context.
-Flags: `--report` `--json` `--markdown` `--output <dir>` `--no-egress` `--offline` `--egress-url <host:port>` `--check-metadata` `--max-depth <n>` `--max-repos <n>` `--home-wide` `--verbose` `--fail-on <severity>`.
-Behavior: build context from process/cwd/home/platform/git → run enabled probes → render terminal summary → optional MD/JSON → never print values.
+Flags: `--report` `--json` `--markdown` `--output <dir>` `--max-depth <n>` `--max-repos <n>` `--home-wide` `--verbose` `--env-broad` `--fail-on <severity>`.
+Behavior: build context from process/cwd/home/platform/git → run the probes (egress + cloud-metadata reachability always run) → render terminal summary → optional MD/JSON → never print values.
 
-**`compare`** — run the battery from the repo root and from a temporary detached worktree off the same commit; render side-by-side. Flags: `--report` `--json` `--markdown` `--no-egress` `--offline` `--egress-url <host:port>` `--check-metadata` `--keep-worktree-on-error` `--output <dir>`. (Details §14.)
+**`compare`** — run the battery from the repo root and from a temporary detached worktree off the same commit; render side-by-side. Flags: `--report` `--json` `--markdown` `--keep-worktree-on-error` `--output <dir>`. The post-MVP orchestrator matrix is surfaced as `compare --compare-ax` (§13.1). (Details §14.)
 
 **`report`** — convenience for `scan --report`.
 
-**`self-test-redaction`** — run synthetic fixtures through all renderers (including the §23 session-report terminal, JSON, and dashboard renderers, fed a synthetic trace that plants the canary in the dropped `file_write.diff`/`mcp_call.input` fields and in a retained `shell_command.command`); assert no canary leaks (§4.4).
+**`self-test-redaction`** — run synthetic fixtures through all shipped renderers (terminal, Markdown, JSON, and the `dashboard` page); assert no canary leaks (§4.4). *(Post-MVP, when the §23 layer lands, this will also feed a synthetic trace through the session-report terminal/JSON/dashboard renderers, planting the canary in the dropped `file_write.diff`/`mcp_call.input` fields and a retained `shell_command.command`. That session-renderer coverage is not yet implemented.)*
 
 ---
 
@@ -140,9 +140,10 @@ Behavior: build context from process/cwd/home/platform/git → run enabled probe
 blastradius — local reachability audit for coding-agent environments
 
 Privacy:
-  • no telemetry   • no findings leave this machine
+  • no telemetry   • secret values never leave this machine
   • secret values are never printed
-  • one optional egress check; disable with --no-egress
+  • network always runs: a fixed egress + cloud-metadata reachability
+    check (no scan data sent); only --ai sends the value-free findings
 ```
 
 ### 7.2 Inventory, not a mystery score
@@ -229,7 +230,8 @@ pub struct Context {
     pub env: EnvSnapshot,               // Vec<EnvVarMeta { key, value_len }> — no values
     pub git: GitContext,
     pub limits: ScanLimits,
-    pub network: NetworkPolicy,
+    pub options: ScanOptions,           // output-shaping (env_broad, verbose); egress + cloud-metadata
+                                        // reachability always run, so there is no network policy/gating
     pub discovery_roots: Vec<PathBuf>,  // sibling-repo search roots, resolved from MAIN repo;
                                         // in compare, computed ONCE and shared across contexts
 }
@@ -291,17 +293,17 @@ Traversal can be expensive and invasive — make limits explicit.
 ## 11. Probe catalog
 
 **MVP (`●`) — ship first**
-- *Credentials:* AWS profiles · SSH private keys · GitHub/token source (offline) · git credential store · secret-named env vars · `.env` discovery + key counts · shell-history token-pattern counts
+- *Credentials:* AWS profiles · SSH private keys · GitHub/token source (local read only) · git credential store · secret-named env vars · `.env` discovery + key counts · shell-history token-pattern counts
 - *Cross-repo:* sibling-repo enumeration · lateral `.env`/key-file counting
 - *Git write:* remote inventory · local credential-source matching · push-likelihood inference · branch/default-branch warning
-- *Egress:* DNS + single TLS connect to neutral host; `--no-egress`/`--offline`
+- *Egress:* DNS + single TLS connect to neutral host (always runs)
 - *Compare:* temp worktree harness · normalized side-by-side diff · cleanup
 
 **Shipped since MVP (`✔`)** — the credential surface is now a **spec-driven store family** (`src/probes/store.rs`: one `StoreSpec` per store, run by one engine; add a store = add a data entry, see `src/probes/registry.rs`): npm/pypi/cargo tokens · Docker registry auth · kubeconfig cluster/context names · GCP/Azure config · HashiCorp Vault · Terraform Cloud · `.pgpass` hosts · GPG secret-key count. Plus bespoke probes: ssh-agent socket reachability (loaded-identity count) · dangerous git-config exec/redirect directives · writable Claude Code control & instruction surface · cloud-metadata reachability · Linux `/proc/*/environ` same-user exposure · writable shell rc · git-hooks writability.
 
-**Also shipped** — browser session/cookie stores · cron/systemd-timer enumeration · ptrace/memory-introspection + `/proc/*/cmdline` secrets · reachable localhost datastores · local privilege escalation (groups + NOPASSWD sudo) · gpg-agent reach · network-config tampering · editor/login exec dotfiles · ~35-store credential family (build-tool/data/secrets-manager/VPN/mail/etc.) · **single-page AI dashboard** (`dashboard [--ai]`) — the reachable-surface inventory as a self-contained local web page (radial blast-radius map, severity tiles, full inventory) plus opt-in AI attack-scenario narratives. See `docs/claude-code-security-model.md §6a` for the full coverage map.
+**Also shipped** — browser session/cookie stores · cron/systemd-timer enumeration · ptrace/memory-introspection + `/proc/*/cmdline` secrets · reachable localhost datastores · local privilege escalation (groups + NOPASSWD sudo) · gpg-agent reach · network-config tampering · editor/login exec dotfiles · ~35-store credential family (build-tool/data/secrets-manager/VPN/mail/etc.) · **storytelling AI dashboard** (`dashboard [--ai]`) — a scrollytelling web page (value-free, swept; React/Babel + webfonts via CDN) whose reachable-surface *denominator* is live (expanding-radius tallies + per-ring finding chips + full inventory) plus opt-in AI attack-scenario narratives. Its per-session scoring and retro-hazard narrative sections are **illustrative post-MVP fixtures** (the §23/§24 engine is not built), labeled as such on the page. See `docs/claude-code-security-model.md §6a` for the full coverage map.
 
-**Specced but NOT built — post-MVP (`○`, §23–§24).** The session blast-radius **scoring layer** (the `score` command and `src/session/`), the **three-tab session dashboard view** (Session Timeline + Blast Radius & Response: toxic combinations, recommended actions, containment simulator, live risk meter, optional PreToolUse block), and **automatic transcript ingestion + retro-hazard detection** are **design only**: `src/session/` and a `score` command do **not** exist in the tree today (verified §24.0). The shipped `dashboard` is the single-page AI view above; the reachable-surface inventory remains the product and the §22 contract.
+**Specced but NOT built — post-MVP (`○`, §23–§24).** The session blast-radius **scoring layer** (the `score` command and `src/session/`), the **three-tab session dashboard view** (Session Timeline + Blast Radius & Response: toxic combinations, recommended actions, containment simulator, live risk meter, optional PreToolUse block), and **automatic transcript ingestion + retro-hazard detection** are **design only**: `src/session/` and a `score` command do **not** exist in the tree today (verified §24.0). The shipped `dashboard` is the storytelling AI view above (live reachable-surface denominator + illustrative post-MVP §23/§24 narrative sections); the reachable-surface inventory remains the product and the §22 contract.
 
 **Post-MVP (`○`)** — sibling-repo remote inventory · benchmark matrix · browser-key decryption-key reachability · desktop-app (Slack/Discord/Thunderbird) local state.
 
@@ -317,10 +319,10 @@ Evidence `{ "files":[...], "profile_count":2, "profiles":["default","prod"] }`. 
 Glob `~/.ssh/id_*`, `*_rsa|_ed25519|_ecdsa`; parse `~/.ssh/config`. Exclude `*.pub`, `known_hosts`, `authorized_keys`, `config`. Treat as private key if regular, readable, non-`.pub`, and first KB contains a `-----BEGIN ... PRIVATE KEY-----` header. No contents. Config: collect Host aliases only.
 Evidence `{ "key_count":3, "paths":[...], "configured_hosts":["github.com","prod-bastion"] }`. Severity `Exposed`/`Notable`/`Info`. **Precision:** don't claim keys are unencrypted/usable — say "3 private key files readable; passphrase status not checked."
 
-### 12.3 GitHub / token source — **offline by default**
-Do **not** call GitHub or run `gh auth status` by default (network). Read local: `~/.config/gh/hosts.yml` (and `~/Library/Application Support/GitHub CLI/hosts.yml`, respecting `XDG_CONFIG_HOME`). Env vars `GITHUB_TOKEN`/`GH_TOKEN`/`GITHUB_PAT` come via §12.5. Report host, user (if present), `token_present`, `token_len`; never the token. **Scopes require network**, so default:
+### 12.3 GitHub / token source — **local read only, never queries GitHub**
+Do **not** call GitHub or run `gh auth status` (that contacts the network). Read local: `~/.config/gh/hosts.yml` (and `~/Library/Application Support/GitHub CLI/hosts.yml`, respecting `XDG_CONFIG_HOME`). Env vars `GITHUB_TOKEN`/`GH_TOKEN`/`GITHUB_PAT` come via §12.5. Report host, user (if present), `token_present`, `token_len`; never the token. **Scopes require a GitHub API call, which this probe never makes**, so:
 ```
-GitHub token source present for github.com; scopes not checked in offline mode
+GitHub token source present for github.com; scopes not checked (no GitHub API call)
 ```
 Optional future `--allow-auth-checks` may fetch scopes after clearly disclosing the network call.
 Evidence `{ "hosts":[{"host":"github.com","user":"octocat","token_present":true,"token_len":40,"scopes_checked":false}] }`.
@@ -390,15 +392,15 @@ branch protection is server-side; not verified by this local scan
 ```
 Severity: `Exposed` if push likely; `Notable` if remotes but source unknown; `Info` if none.
 
-### 12.11 Egress — **REVISED MECHANISM (Fix 2): no first-party SPOF**
+### 12.11 Egress — **fixed anycast target, no first-party SPOF**
 Goal: "can a process make outbound connections from here?" Don't make the answer depend on infra you stood up the night before, and don't make yourself the host logging every attendee's IP.
 
-**Default:** resolve a well-known hostname + open a single **TLS connection** to a major always-up anycast endpoint (default `1.1.1.1:443`), no HTTP body. Measure handshake latency; send nothing. Override with `--egress-url HOST:PORT`; URL schemes, paths, credentials, and port `0` are rejected before the scan starts. Custom targets are redacted in reports as `[custom egress target]`; reports keep `target_kind` and `resolved_ip_count` but omit the raw custom hostname/IPs. Disable with `--no-egress`/`--offline`.
-*Optional:* if you want a controlled HTTP response instead of a bare connect, use a HEAD to a major CDN — **or** stand up your own endpoint **now (not event-eve)** and own the "yes, our host sees your IP" line in `--help`. Either way the probe must never be a single fresh endpoint whose downtime breaks the demo.
+**Mechanism (always runs):** resolve a well-known hostname + open a single **TLS connection** to a major always-up anycast endpoint (`1.1.1.1:443`), no HTTP body. Measure handshake latency; send nothing. The target is fixed in the binary — there is no configurable destination and no way to point the probe at an arbitrary host. The egress probe and the §extra cloud-metadata reachability check (one fixed TCP connect to the link-local IMDS endpoint) are not gated by any flag.
+*Optional design note:* if a controlled HTTP response is ever wanted instead of a bare connect, use a HEAD to a major CDN — never a single fresh first-party endpoint whose downtime breaks the demo.
 ```
 outbound connectivity reachable — 1.1.1.1, TLS ok, 19 ms
 ```
-Evidence for the default target includes `{ "target":"1.1.1.1:443", "target_kind":"default", "dns_resolved":true, "resolved_ips":["1.1.1.1"], "resolved_ip_count":1, "tls_handshake":true, "latency_ms":19 }`. Evidence for a custom target replaces `target` with `[custom egress target]` and omits `resolved_ips` while preserving `resolved_ip_count`. Severity: `Exposed` if open; `Notable` if DNS ok but handshake fails; `Info` if disabled/blocked. Privacy note in report: "No findings were sent. The remote necessarily observed source IP and timestamp."
+Evidence includes `{ "target":"1.1.1.1:443", "target_kind":"default", "dns_resolved":true, "resolved_ips":["1.1.1.1"], "resolved_ip_count":1, "tls_handshake":true, "latency_ms":19 }`. Severity: `Exposed` if open; `Notable` if DNS ok but handshake fails; `Info` if blocked. Privacy note in report: "No findings were sent. The remote necessarily observed source IP and timestamp."
 
 ---
 
@@ -462,7 +464,7 @@ The ambient block and the one-line verdict carry the hook; the `CurrentRepo` del
 
 ## 14. Report formats
 
-**Terminal (default):** readable in 80–100 cols, deterministic ordering. Sections: `CREDENTIALS` → `CROSS-REPO` → `GIT WRITE` → `EGRESS` → `WORKTREE COMPARISON` → `WHAT WOULD CONTAIN THIS`.
+**Terminal (default):** readable in 80–100 cols, deterministic ordering. Sections: `CREDENTIALS` → `CROSS-REPO` → `GIT WRITE` → `EGRESS` → `PROCESS` → `HOST PERSISTENCE` → `SYSTEM INFO` → `WORKTREE COMPARISON` → `WHAT WOULD CONTAIN THIS`.
 
 **Markdown (`--report` → `blastradius-report.md`):** timestamp, version, platform, value-redacted command shape, privacy note, findings by class, comparison table (if any), limitations, containment guidance. No values.
 
@@ -471,7 +473,7 @@ The ambient block and the one-line verdict carry the hook; the `CurrentRepo` del
 {
   "schema_version": "1.0",
   "tool": { "name": "blastradius", "version": "0.1.0" },
-  "run": { "id": null, "timestamp": "2026-06-08T12:00:00Z", "mode": "compare", "offline": false, "egress_enabled": true },
+  "run": { "id": null, "timestamp": "2026-06-08T12:00:00Z", "mode": "compare" },
   "contexts": [ { "label": "repo-root", "cwd": "~/code/app", "repo_root": "~/code/app",
                   "git": { "is_repo": true, "branch": "main", "head_sha_short": "abc1234" } } ],
   "findings": [ { "context": "repo-root", "id": "aws.credentials.profiles", "class": "Credentials",
@@ -533,7 +535,7 @@ The package is a tiny JS shim that, **on explicit invocation**, detects OS/arch,
 
 **Day 2 — `.env`, shell history, siblings.** `.env` discovery + counts; history pattern counts; sibling enumeration (**with §12.8 anchoring wired in from the start**); lateral secrets; scan limits; path shortening; deterministic ordering. *DoD:* `cargo run -- scan --verbose` shows current + sibling exposure without leaking values.
 
-**Day 3 — worktree compare + egress (framing on top of the engine).** git context; temp worktree harness; cleanup guard; **shared `discovery_roots`**; normalization; punch-protected comparison renderer; egress (neutral host); `--no-egress`/`--offline`. *DoD:* `cargo run -- compare` shows side-by-side ambient repo-root vs worktree. The compare is near-free on top of the engine — so **the engine (Days 1–2) is the asset and the real line in the sand: if the back half slips, a clean reachability inventory alone is still the product.**
+**Day 3 — worktree compare + egress (framing on top of the engine).** git context; temp worktree harness; cleanup guard; **shared `discovery_roots`**; normalization; punch-protected comparison renderer; egress (neutral host, always runs). *DoD:* `cargo run -- compare` shows side-by-side ambient repo-root vs worktree. The compare is near-free on top of the engine — so **the engine (Days 1–2) is the asset and the real line in the sand: if the back half slips, a clean reachability inventory alone is still the product.**
 
 **Day 4 — reports, polish, installability.** Markdown + JSON renderers; `--report`; terminal polish (clarity *is* the product — spend here); README; safety docs; release build; npm shim skeleton (no postinstall); manual release install docs. *DoD:* `blastradius compare --report` produces clean local reports.
 
@@ -572,11 +574,14 @@ A local diagnostic that shows what a coding agent running as you can reach.
 ## Why this exists
 Worktrees are not security boundaries. Coding agents inherit ambient authority.
 
-## Install        npx @amlalabs/blastradius compare   ·   curl -fsSL … | sh
+## Install        npx @amlalabs/blastradius compare   ·   (or a release tarball + SHA256SUMS)
 ## What it checks  credentials, env vars, sibling repos, git auth surface, egress
 ## What it never does
   no telemetry · no secret values · no exploit behavior · no repo secret scanning
-  no network except the documented egress probe (one TLS connect; --no-egress to disable)
+  no findings or secret values leave the machine; the outbound connections are the
+  always-on egress + cloud-metadata reachability checks (no scan data sent), the
+  opt-in dashboard --ai call (value-free findings only), and the dashboard page's
+  CDN/webfont asset loads (no scan data)
 ## Demo            (terminal screenshot of the worktree reveal)
 ## Interpreting results   reachability, not malice
 ## What would contain this  credential substitution · filesystem isolation · egress control
@@ -590,7 +595,7 @@ Worktrees are not security boundaries. Coding agents inherit ambient authority.
 **Carried over from the refined draft (correctness, kept):**
 1. **Ambient vs current-directory split in `compare`** (`FindingScope`). "IDENTICAL" was wrong — an untracked `.env` won't exist in a `HEAD` worktree, so a `1→0` row makes the tool look sloppy. Splitting `Ambient` from `CurrentRepo` is *more* persuasive: it pre-empts the obvious objection.
 2. **"Push likelihood," not "can push"** — local credential presence ≠ server authorization.
-3. **GitHub scope detection offline by default** — `gh auth status`/API calls contradict the one-egress-probe promise.
+3. **GitHub scope detection reads local config only** — `gh auth status`/API calls would query GitHub; the probe never makes that call.
 4. **No `--no-redact`; canary self-test instead** — a raw-secret flag is a demo/CI foot-gun.
 
 **New in v2 (the review fixes):**
@@ -978,7 +983,7 @@ matches no real id suppresses nothing):
 |---|---|---|---|
 | `scoped_temp_cloud_creds` | Credential substitution | `aws.credentials.profiles`, `github.token_source`, `git.credential_store`, `env.secret_names`, store-family file creds | `read_secret` weights; `exfiltration_path` credential leg; `production_deployment_path` cloud-cred leg |
 | `repo_only_filesystem` | Filesystem isolation | `cross_repo.dotenv`, `cross_repo.lateral_secrets`, `cross_repo.sibling_repos`, `browser.session_stores`, `credentials.shell_history`, `$HOME`-reachable file creds | `post_root_host_visibility` filesystem leg; `saas_session_hijack` cookie leg; `multi-sensitive-domain` ×1.25 when breadth came from cross-repo reach. Does **not** suppress the in-repo deploy-workflow edit |
-| `no_egress` | Egress control | `egress.connectivity`; `egress.mediation` (cloud-metadata reachability — opt-in `--check-metadata`, present only if checked) | `network_access` weight; `exfiltration_path` egress leg; `saas_session_hijack` network leg |
+| `no_egress` | Egress control | `egress.connectivity`; `egress.mediation` (cloud-metadata reachability — always checked) | `network_access` weight; `exfiltration_path` egress leg; `saas_session_hijack` network leg |
 | `no_ssh_agent` | (credential substitution subset; §11 ssh-agent) | `ssh.agent_socket` | `source_control_mutation_path`. Does **not** by itself lower `git.push_likelihood` (§12.10) — that basis is readable key files / token source / credential-store host, suppressed by `repo_only_filesystem` / `scoped_temp_cloud_creds` |
 | `process_isolation` | Process isolation | `process.proc_environ`, `process.memory_introspection`, `process.cmdline_secrets`, `host.privilege_escalation`, `host.privileged_reachability` | `post_root_host_visibility`; drops the escalation amplifier to ×1.0 |
 | `all_controls` | all of the above | Union of every set above | Union; yields the **residual floor** |
@@ -1064,8 +1069,7 @@ blastradius score [TRACE] [--trace FILE] [--baseline FILE]
                   [--ai] [--model MODEL]
                   [--fail-on-score N]
                   [--hook] [--block-on-score N]
-                  [--no-egress] [--offline] [--egress-url HOST:PORT]
-                  [--check-metadata] [--home-wide] [--max-depth N] [--max-repos N]
+                  [--home-wide] [--max-depth N] [--max-repos N]
 ```
 
 - **Trace input.** Positional `[TRACE]` and `--trace FILE` are equivalent (`blastradius
@@ -1083,7 +1087,7 @@ blastradius score [TRACE] [--trace FILE] [--baseline FILE]
 - **Output.** Renders a `SessionReport` (§23.9); `--json`/`--markdown`/`--report`/`--output`
   reuse §4.5 conventions verbatim. The terminal block always pairs the number with the
   `reasons[]` evidence and `finding_ref` back-pointers — never a bare `Risk: 87` (§7.2).
-- **`--ai` is explain-only** (§23.11); `--offline` disables `--ai`. The score renders
+- **`--ai` is explain-only** (§23.11) and off by default. The score renders
   identically with or without `--ai`.
 - **CI gating — `--fail-on-score N`.** Exits with the existing §19 code `4` (`--fail-on`
   threshold met) when `risk_score ≥ N` (0–100; out of range → exit `2`). **No new exit code
@@ -1105,7 +1109,7 @@ blastradius score [TRACE] [--trace FILE] [--baseline FILE]
 
 ### 23.13 Dashboard — three-tab session UX (P2)
 
-The existing `dashboard` command (single self-contained offline page, `src/dashboard/mod.rs`
+The existing `dashboard` command (local web page (value-free, swept; UI assets via CDN/webfonts), `src/dashboard/mod.rs`
 + `page.rs`, `/*__BR_DATA__*/` injection) gains session inputs and a tab bar. It reads one
 injected `D` object: today's ambient fields plus `D.session` (the `SessionReport`) and
 `D.containment`. **The dashboard renders, never scores** — it MUST NOT recompute risk.
@@ -1230,12 +1234,10 @@ beyond the demo banner; persisted session history.
 
 ### 23.18 Open decisions (surface, do not assume)
 
-- **Dashboard bind default — DECIDED: keep `0.0.0.0` (maintainer, 2026-06-13).** The code
-  default stays `--bind 0.0.0.0` (`src/cli.rs:60`), and the existing no-auth stderr warning
-  for non-loopback binds (`src/dashboard/mod.rs`) is retained and MUST be kept by every
-  downstream slice. The security recommendation to prefer `127.0.0.1` (strengthened by the
-  more-sensitive session tabs) stands on record as guidance, but the default is **not**
-  changed; `--bind 127.0.0.1` remains the explicit opt-in for loopback-only.
+- **Dashboard bind default.** The default bind is `0.0.0.0:5321`, always — there is no
+  loopback default and no per-mode (e.g. `--history`) bind override. `--bind 127.0.0.1`
+  restricts to loopback. A loud no-auth stderr warning prints on any non-loopback bind
+  (`src/dashboard/mod.rs`) and MUST be kept by every downstream slice.
 - **Toxic-combo path-weight scale** (`critical +40 / high +25 / medium +15`) is the one
   number not literally in the brief — confirm with P1 before freezing (§23.6).
 - **`--fail-on-score` exit code.** Resolved here to reuse `4`; if CI needs to distinguish the
@@ -1366,6 +1368,7 @@ pub struct HistoricalHazard {
     pub reachability: ReachabilityVerdict,
     pub recency: RecencyVerdict,
     pub status: HazardStatus,
+    pub exit_in_session: bool,           // did the activating session also egress/exit? gates the path/exfil headline clause (§24.4)
     pub ordering: Option<LegOrdering>,   // value-free confidence signal, NOT a gate (§24.6)
     pub realized_score: u8,              // 0..=100 ranking key
     pub summary: String,                 // templated, value-free, claim-bounded
@@ -1475,7 +1478,7 @@ The reserved `persistence_path` rule inherits this machinery for free the day §
 
 **§24.8b — Canary self-test extended (mandatory).** The `self-test-redaction` harness (verified `self_test_redaction` exists in `src/lib.rs`, seeding `BLASTRADIUS_TEST_SECRET`/`OPENAI_API_KEY`) gains a synthetic-transcript stage, one fixture per parser shape, planting `br_test_SHOULD_NOT_LEAK` in **every discard and reduced-retain vector**: prompt text, `thinking`, `text`, `tool_result` (file bytes), `file_read.path`, `file_write.path`, `mcp_call.server`, `mcp_call.input` (None), `file_write.diff` (None), and a `shell_command` body containing an inline assignment (`export BR_CANARY=…` → `key+value_len`), a flag-with-value (`--password=…` → RHS redacted), a separated flag value (`-H …` → default-redact), a pattern-shaped `ghp_…` (Layer-2), **and a non-pattern, low-entropy paste `br_test_SHOULD_NOT_LEAK_RAW_PASTE`** (default operand redaction — the exact case an entropy gate would *fail*, and what proves the allowlist-by-default rule). Assertions: (1) serialize the parsed `SessionTrace`/`Vec<AgentEvent>` and assert the canary + `ghp_` shape are absent **before the engine** (proves Layer-0/§24.8a); (2) run through `audit-history`/`score` and assert absence from terminal/JSON/markdown/dashboard renderers, the `--hook` decision, and the `--ai` payload. A green canary on diff/command/host alone is **insufficient** and is itself a defect. Exit non-zero with a loud, value-free message on any leak.
 
-**Reconciliation with §4.1–§4.6:** read-only (`open(O_RDONLY)`, never write/rename/delete a transcript; the only allowed writes are the requested report and the opt-in `--state` cursor, both `0600`/temp+rename/no-symlink-follow); no-secret-values output (ids, shortened labels, command shapes, `host:port`, classifications, counts, RFC3339 timestamps, session UUIDs); Layer-0+Layer-1+Layer-2 layering with the **same** `report::redaction::sweep`; no `--no-redact`/raw mode (raw inspection, if ever, is a compile-time feature); output local only; **no network I/O in slurp** (the only egress remains the single §4.6 baseline-scan probe); `--ai` reads the value-free report only, behind `analyze::redaction_guard`, `--offline` disables it.
+**Reconciliation with §4.1–§4.6:** read-only (`open(O_RDONLY)`, never write/rename/delete a transcript; the only allowed writes are the requested report and the opt-in `--state` cursor, both `0600`/temp+rename/no-symlink-follow); no-secret-values output (ids, shortened labels, command shapes, `host:port`, classifications, counts, RFC3339 timestamps, session UUIDs); Layer-0+Layer-1+Layer-2 layering with the **same** `report::redaction::sweep`; no `--no-redact`/raw mode (raw inspection, if ever, is a compile-time feature); output local only; **no network I/O in slurp** (the only egress remains the §4.6 baseline-scan probes); `--ai` reads the value-free report only, behind `analyze::redaction_guard`, and is off by default.
 
 **Opt-in + visible discovery.** Auto-discovery is **not default** — gated behind `--slurp`/`--retro`/the new verbs. A first-run banner names exactly which directories will be read *before* any read; a per-source summary (dirs scanned, files found incl. explicit `found: 0`) is emitted after, so an empty slurp is visibly empty, never mistaken for "no hazards." Divergent/unsupported sources (macOS IDE SQLite) are labeled `mocked`/`unsupported`, not silently skipped.
 
@@ -1494,11 +1497,11 @@ bare `blastradius` ≡ `scan` is unchanged. Two new variants are added to the `C
 
 **Required plumbing (verified gaps):**
 - `src/util/time.rs` (today only `now_iso8601`/`iso8601_from_unix`) must add `parse_duration` (`Nd|Nh|Nm|Nw`) and `unix_from_iso8601` (the civil-from-days algorithm reversed) — both `--since` windowing and `recency_days` need epoch seconds; no date dependency is added.
-- `command_line_from`'s `VALUE_FLAGS`/`COMMANDS` allowlists (`src/lib.rs:545`) must gain `sessions`, `audit-history`, and `--since`/`--agent`/`--repo`/`--baseline`/`--state`/`--min-level`/`--top`/`--fail-on-score`, so user-supplied paths render as `[value]`, not leaked into the report body.
+- `command_line_from`'s `VALUE_FLAGS`/`COMMANDS` allowlists (`src/lib.rs:494-516`) must gain `sessions`, `audit-history`, and `--since`/`--agent`/`--repo`/`--baseline`/`--state`/`--min-level`/`--top`/`--fail-on-score`, so user-supplied paths render as `[value]`, not leaked into the report body.
 
 > **Unresolved cross-slice CLI contradiction (open question).** One slice proposed folding discovery under `score --slurp`/`score --list-sessions`; the dedicated-CLI slice proposed top-level `sessions`/`audit-history`. This doc adopts the dedicated verbs as the primary, more fully-specced surface, but both `score` and these verbs are equally greenfield, so the maintainer must pick one and add it explicitly to the §11 verb table + §23.12 (do not introduce a verb implicitly).
 
-**Cron/CI.** `audit-history --since 1d --offline --baseline scan.json --fail-on-score 75` is the CI gate (exit 4). For unattended cron, recommend `--offline`/`--no-egress`/a cached `--baseline` so a nightly job is not opening egress every run, and `--state` for cheap idempotent deltas over a months-deep tree. `--watch`/daemon mode is out of scope; cron is the supported continuous path.
+**Cron/CI.** `audit-history --since 1d --baseline scan.json --fail-on-score 75` is the CI gate (exit 4). For unattended cron, recommend a cached `--baseline` so a nightly job is not re-running the live scan (and its egress probes) every run, and `--state` for cheap idempotent deltas over a months-deep tree. `--watch`/daemon mode is out of scope; cron is the supported continuous path.
 
 ---
 
@@ -1508,7 +1511,7 @@ A fourth tab driven by injected `D.history = HistoryAuditReport`. `blastradius d
 
 Components (reuse the existing palette, no new hex): `HazardLedger` (ranked rows: rank, level pill, score meter, recency chip with an "approx" marker when `time_source=mtime`, agent chip, value-free headline, toxic-combo tag shown only when one activated); drill-down expanding `reasons[]` (shape-only) where each `finding_ref` chip links to the **same Tab-1 probe node** the live Tab-3 reasons link to (the join is auditable end-to-end; the dashboard mints no finding ids); `FindingHeatStrip` (`by_finding[]`); retro `ContainmentSimulator` (each §23.10 control shows `hazards_suppressed`, e.g. "`no_egress` → would have prevented 4 of 6"). `--ai` stays explain-only; the ledger renders byte-identically with or without it.
 
-**Bind default (exposure fix, load-bearing):** the dashboard's current default bind is `0.0.0.0` with **no auth** (verified `src/cli.rs:60`). Tab 4 publishes *which still-reachable credentials an agent actually read* — a precise LAN targeting map. Therefore **when `--history` is supplied, default the bind to `127.0.0.1`**; an explicit `--bind 0.0.0.0` is allowed but must keep and extend the existing no-auth stderr warning to name realized-hazard exposure. `D.history` is value-free by construction and the whole `D` payload still passes the final `sweep()` before it is written to the socket.
+**Bind default (load-bearing):** the dashboard's default bind is `0.0.0.0` with **no auth** (verified `src/cli.rs:60`), always — there is no loopback default and **no per-mode override**; `--history` does **not** change it. Tab 4 publishes *which still-reachable credentials an agent actually read* — a precise LAN targeting map — so when Tab 4 is served on a non-loopback bind the existing no-auth stderr warning MUST be kept and extended to name realized-hazard exposure; `--bind 127.0.0.1` is the explicit loopback opt-in. `D.history` is value-free by construction and the whole `D` payload still passes the final `sweep()` before it is written to the socket.
 
 ---
 
@@ -1534,8 +1537,8 @@ src/session/                       # NEW subtree — does not exist today; depen
       json_gemini.rs json_dir.rs markdown_aider.rs sqlite_vscdb.rs   # sqlite feature-gated `session-sqlite`
 src/util/time.rs                   # ADD parse_duration + unix_from_iso8601
 src/lib.rs                         # ADD Command::{Sessions,AuditHistory}; extend command_line allowlists; route exit 2
-src/cli.rs                         # ADD SessionsArgs/AuditHistoryArgs; --history on DashboardArgs; bind override
-src/dashboard/{mod.rs,page.rs}     # ADD Tab 4, D.history injection, loopback default for --history
+src/cli.rs                         # ADD SessionsArgs/AuditHistoryArgs; --history on DashboardArgs
+src/dashboard/{mod.rs,page.rs}     # ADD Tab 4, D.history injection (bind stays global 0.0.0.0; no per-mode override)
 ```
 
 `locate.rs` reads `XDG_CONFIG_HOME`/`XDG_DATA_HOME`/`COPILOT_HOME`/`CURSOR_PROJECT_DIR` from `std::env` **directly** (verified: `EnvSnapshot::capture()` stores only key+value_len, no path getter); env paths are used transiently to resolve+glob and **never** persisted into any `SessionSource`/cursor/report. Discovery honors `ScanLimits`; the agent table is an explicit data list so the inventory of every directory opened stays auditable. No new heavy deps for the high-confidence majority (`serde_json` + `walkdir` already present); SQLite is feature-gated off.
@@ -1547,10 +1550,10 @@ src/dashboard/{mod.rs,page.rs}     # ADD Tab 4, D.history injection, loopback de
 **Open questions (maintainer decisions).**
 
 - CLI surface contradiction unresolved: dedicated `sessions`/`audit-history` verbs (adopted here as primary) vs folding under `score --slurp`/`score --list-sessions`. Both are greenfield (no `score` command exists yet); maintainer must pick one and add it explicitly to the §11 verb table and §23.12.
-- Ranking constants are not in the brief and must be frozen with fixtures + P1 sign-off (the §23.18 path-weight analogue): combo_base 40/25/15, reach_factor ladder 1.00/0.70/0.45/0.10, durability 1.0+0.15*frac, recency half-life 14d / floor 0.25, the x2.5 normalizer, the +15 same-session-exit bonus (note: when exit_in_session is true the §23.8 exfiltration_path +40 path-weight is already baked into the spine session score, so the +15 is deliberate additive emphasis — confirm).
+- Ranking constants are not in the brief and must be frozen with fixtures + P1 sign-off (the §23.18 path-weight analogue): combo_base 40/25/15, reach_factor ladder 1.00/0.70/0.45/0.10, durability 1.0+0.15*frac, recency half-life 14d / floor 0.25, the x2.5 normalizer. The §24.3.4 `realized_score` formula is the single source of truth; there is no separate same-session-exit bonus (when `exit_in_session` is true the §23.8 exfiltration_path +40 path-weight is already baked into `combo_base`, so the exit signal is reflected there, not added again).
 - Recency default windows (discovery max_age_days 90, retro --since 7d) trade completeness for bounded work; an older-but-still-reachable cred exfil is skipped unless widened. The recency-excluded count is surfaced, but the defaults need product sign-off.
 - --state persisted cursor is new on-disk state; §22 lists persisted session history as not-required. It stores only offsets/inode-ids/path-hashes/session-UUIDs (no content) but the maintainer must approve adding any persisted file; default OFF.
-- Dashboard per-mode bind override (loopback default only when --history) vs changing the global 0.0.0.0 default — **DECIDED: keep the global `0.0.0.0` default (maintainer, 2026-06-13); no per-mode override.** The extended no-auth warning (naming realized-hazard exposure when Tab 4 is served on a non-loopback bind) is retained as the mitigation.
+- Dashboard bind: the default is the global `0.0.0.0` with no per-mode override (`--history` does not change it; `--bind 127.0.0.1` restricts to loopback). The extended no-auth warning (naming realized-hazard exposure when Tab 4 is served on a non-loopback bind) is retained as the mitigation.
 - --fail-on-score reuses exit 4; if a fleet must distinguish the retro gate from the ambient --fail-on and the session --fail-on-score gates, code 5 is the alternative — maintainer's call.
 - Unverified globs (Cursor CLI ~/.cursor/projects/*/agent-transcripts, Copilot ~/.copilot/session-state, Gemini ~/.gemini/tmp, opencode storage layout) are runtime-probed and format-sniffed rather than asserted; they may be wrong/empty on some versions and need real-machine confirmation.
 - opencode msg_*.json ordering falls back to mtime if ids are non-monotonic in some version — confirm id monotonicity across opencode releases.
@@ -1565,7 +1568,7 @@ src/dashboard/{mod.rs,page.rs}     # ADD Tab 4, D.history injection, loopback de
 - ShellCommand.command argv reduction regressing to a blacklist/entropy gate: any operand that is neither a recognized structural token nor high-entropy would survive verbatim (positional secrets like mysql -pSECRET, -H 'Authorization: Bearer X', echoed sk-/ghp- literals, the low-entropy canary br_test_SHOULD_NOT_LEAK_RAW_PASTE). Must stay allowlist-by-default with --flag=VALUE RHS-redaction; the canary stage-1 (serialized AgentEvent before the engine) is the hard gate that fails loudly if anyone reintroduces an entropy gate.
 - Overstating maturity / hidden dependency: src/session/ does not exist and there is no `score` command — the entire §23 session layer is post-MVP. This slice cannot land before the §23 trace.rs/normalize.rs/classify.rs/toxic_combinations.rs scaffolding (and the frozen finding_triggers()/rule_for() accessors) exist. Sequencing risk if treated as additive to shipping code.
 - False-positive over-claim: §23.8 rules assert co-occurrence within a session, not causation; a credential read at minute 1 and an unrelated curl at minute 40 still activate exfiltration_path. Current-reachability gating + recency + the RemediatedSince asymmetry + the directory-prefix join-tightening mitigate but do not eliminate it; the wording boundary (composes/still-reachable, never 'exfiltrated', path clause only when exit_in_session or a combo actually fired) is load-bearing and must be enforced in headline templating.
-- Dashboard exposure: Tab 4 publishes which still-reachable credentials an agent actually read — a precise LAN targeting map — and the dashboard default bind is 0.0.0.0 with no auth. Mitigated by defaulting to 127.0.0.1 under --history; an explicit 0.0.0.0 override must keep the extended no-auth warning, or this becomes a network-exposed targeting service.
+- Dashboard exposure: Tab 4 publishes which still-reachable credentials an agent actually read — a precise LAN targeting map — and the dashboard default bind is 0.0.0.0 with no auth, always. Mitigated by the extended no-auth warning on any non-loopback bind (and by `--bind 127.0.0.1` to restrict to loopback); without the warning this becomes a network-exposed targeting service.
 - Silent-empty discovery read as safety: wrong/absent globs, macOS vs Linux IDE divergence, ctx.home None, or OTEL-only agents yield zero sessions; without the opt-in banner + per-source found:0 summary + 'agent configured but 0 transcripts parsed' diagnostics, an operator reads absence-of-evidence as evidence-of-absence.
 - Codex rollout world-readable 0644 secret-bearing function_call/event_msg argument bodies require a DISTINCT value-free extractor (not the Claude block model); if jsonl_codex.rs is treated as a Claude reuse, those argument bodies leak.
 - Inherited content surface in HistoryAuditReport: reasons[].evidence reused verbatim from §23 would carry the swept-but-retained ShellCommand.command, and redaction::sweep is known-shape regex only (psql "...password=...", mysql -p, bare HTTP-header tokens survive). history.rs must reduce evidence to shape-only (argv[0]+pattern-category+host:port+ids+counts) and the §24.9 non-shaped-secret canary must fail the build if a raw command body ever reaches a RealizedHazard.

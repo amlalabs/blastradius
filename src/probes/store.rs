@@ -1362,7 +1362,7 @@ mod tests {
             env: crate::context::EnvSnapshot { vars: Vec::new() },
             git: crate::context::GitContext::default(),
             limits: crate::context::ScanLimits::default(),
-            network: crate::context::NetworkPolicy::default(),
+            options: crate::context::ScanOptions::default(),
             discovery_roots: Vec::new(),
         }
     }

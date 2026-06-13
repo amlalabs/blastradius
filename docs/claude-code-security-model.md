@@ -331,7 +331,7 @@ These probes turn the model above into a live, value-free inventory:
 | `host.sandbox_binary_integrity` | HostPersistence | Resolves `bwrap`/`socat` exactly as a bare-name exec would, then flags whether that binary is **replaceable in place** (writable file/dir) or **PATH-shadowable** (a user-writable dir precedes it on `$PATH`) — finding #1, the runc CVE-2019-5736 class. Escalates if a setuid-root binary sits on a writable path; **downgrades to Info** when `sandbox.bwrapPath`/`socatPath` pin an absolute, non-writable path (managed scope wins). |
 | `process.sandbox_detect` | Process | Full self-detection: per-namespace isolation (net/pid/ipc/uts/cgroup/user — exposes finding #10 when run inside a sandbox), active seccomp filter, `AF_UNIX` block, `HTTP(S)_PROXY`, `/proc/self/environ` reach, and ia32-execution support (the `socketcall` bypass surface, finding #5). Emits a `sandboxed: yes/likely/no` verdict — the framing signal for every other finding. |
 | `host.deferred_exec_sinks` (+ `host.autostart_sinks`) | HostPersistence | Repo sinks that run **outside** bwrap later — Makefile/justfile, `.envrc`, `package.json` lifecycle scripts, CI workflows, `.vscode` tasks, lockfiles — plus user-autostart dirs; presence + writability (findings #6/#13) |
-| `egress.mediation` | Egress | Proxy mediation (`HTTP(S)_PROXY`) + the hostname-only / no-TLS-inspection caveat (finding #11), and opt-in cloud-metadata reachability (`--check-metadata`, finding #12) |
+| `egress.mediation` | Egress | Proxy mediation (`HTTP(S)_PROXY`) + the hostname-only / no-TLS-inspection caveat (finding #11), and cloud-metadata reachability (always probed, finding #12) |
 | `egress.connectivity` | Egress | Outbound reachability (DNS + TLS) to a neutral host |
 | `claude_code.writable_control_surface` (+ `.repo`) | HostPersistence | Read-only writability check of the files that *constrain or instruct the agent*: `settings.json`/`settings.local.json`/`.mcp.json` (writing them disables the sandbox / adds hooks) and `CLAUDE.md`/`AGENTS.md`/skills (durable prompt injection). Own-writable = Notable, non-owner-writable = Exposed (§4 / §4.1, finding #13). |
 | `ssh.agent_socket` | Credentials | Whether `SSH_AUTH_SOCK` is reachable and how many identities are loaded (count only, via `REQUEST_IDENTITIES`) — loaded keys are usable for auth without reading any key file, including passphrase-protected keys |
@@ -392,12 +392,18 @@ container `/run/secrets`), each a value-free `StoreSpec` data entry.
 
 ### AI blast-radius narratives (`dashboard --ai`)
 
-`blastradius dashboard` serves a local, self-contained web dashboard of the
-reachable surface. With `--ai`, it sends the **value-free** inventory (finding
-ids/classes/severities/titles/summaries — never secret values, re-swept before
-send) to the OpenAI API and renders defender-oriented attack-path scenarios
-(chain · impact · containment) grounded only in what the scan found. This is the
-one feature that egresses anything, and it is opt-in; `--offline` disables it.
+`blastradius dashboard` serves a local web dashboard of the reachable surface
+(value-free, swept; the page loads React/Babel and webfonts from a CDN for
+rendering — those carry no scan data). With `--ai`, it sends the **value-free**
+inventory (finding ids/classes/severities/titles/summaries — never secret
+values, re-swept before send) to the OpenAI API and renders defender-oriented
+attack-path scenarios (chain · impact · containment) grounded only in what the
+scan found. `--ai` is the only feature that sends the (value-free) findings
+inventory off-machine, and it is opt-in; omit it to send nothing. Secret values
+never leave the machine under any flag. (Independently, opening the dashboard
+fetches its React/Babel UI assets and webfonts from a CDN — those carry no scan
+data; and every scan always runs the egress + cloud-metadata reachability
+probes, which send no findings.)
 
 All probes are read-only and never emit secret values (see [the redaction layers](../SPEC.md)).
 
@@ -424,7 +430,7 @@ inherits. By taxonomy:
 
 | Surface class | Covered |
 |---|---|
-| **Cloud/cluster identity** | AWS(+SSO cache), GCP, Azure, Kubernetes (config + in-pod token), Docker/podman registry, cloud-init user-data, container `/run/secrets`, IMDS (opt-in) |
+| **Cloud/cluster identity** | AWS(+SSO cache), GCP, Azure, Kubernetes (config + in-pod token), Docker/podman registry, cloud-init user-data, container `/run/secrets`, IMDS (always probed) |
 | **Secrets managers / decryptors** | HashiCorp Vault, SOPS/age keys, 1Password/Bitwarden/LastPass/`pass`, GPG keys **and gpg-agent**, OS keyring (GNOME/KWallet/Keychain), Ansible-vault, Teleport |
 | **Package/registry/build** | npm, PyPI, Cargo, Terraform, Maven, Gradle, Composer, RubyGems/Bundler, pip, NuGet, Conda |
 | **Data/DB** | dbt, Databricks, Snowflake, MySQL client, `.pgpass`, reachable localhost datastores |
@@ -434,7 +440,7 @@ inherits. By taxonomy:
 | **Cross-repo** | sibling repos, lateral secret/key files (incl. tfstate, Rails `master.key`) |
 | **Process / kernel** | sandbox detection/reach, `/proc/*/environ` + **`/proc/*/cmdline`**, **ptrace/memory introspection**, AF_UNIX/docker.sock, **privilege escalation** (groups + NOPASSWD sudo) |
 | **Host persistence / deferred exec** | shell rc + editor/login dotfiles, `$PATH` shadowing, git hooks, build/CI/editor/dev-env sinks, autostart + **cron/systemd timers**, sandbox-binary integrity, Claude control/instruction surface, network-config tampering |
-| **Egress** | DNS+TLS reachability, proxy mediation, cloud-metadata (opt-in) |
+| **Egress** | DNS+TLS reachability, proxy mediation, cloud-metadata (always probed) |
 
 **Deliberately out of scope** (documented, not silently missing):
 

@@ -134,34 +134,16 @@ impl Default for ScanLimits {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct NetworkPolicy {
-    /// Whether the egress probe is allowed to run at all.
-    pub egress_enabled: bool,
-    /// Whether we are fully offline (implies egress disabled).
-    pub offline: bool,
-    /// Target host:port for the egress probe (§12.11).
-    pub egress_target: String,
+/// Output-shaping options for a scan. A scan always performs its outbound
+/// reachability probes (egress + cloud-metadata), but those send no findings or
+/// secret values; the only feature that transmits the (value-free) findings
+/// inventory off-machine is the opt-in `dashboard --ai` call, handled separately.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ScanOptions {
     /// Whether broad env-name heuristics are enabled (`--env-broad`, §12.5).
     pub env_broad: bool,
     /// Whether to list env/dotenv key names (`--verbose`).
     pub verbose: bool,
-    /// Opt-in: also probe cloud-metadata reachability (a 2nd outbound connect,
-    /// off by default to honor the "exactly one egress check" promise, §3).
-    pub check_metadata: bool,
-}
-
-impl Default for NetworkPolicy {
-    fn default() -> NetworkPolicy {
-        NetworkPolicy {
-            egress_enabled: true,
-            offline: false,
-            egress_target: "1.1.1.1:443".to_string(),
-            env_broad: false,
-            verbose: false,
-            check_metadata: false,
-        }
-    }
 }
 
 /// The fully-resolved scan context handed to every probe.
@@ -177,7 +159,7 @@ pub struct Context {
     pub env: EnvSnapshot,
     pub git: GitContext,
     pub limits: ScanLimits,
-    pub network: NetworkPolicy,
+    pub options: ScanOptions,
     /// Sibling-repo search roots, resolved from the MAIN repo (§12.8). In
     /// `compare` these are computed once and shared across contexts.
     pub discovery_roots: Vec<PathBuf>,
@@ -189,7 +171,7 @@ impl Context {
         label: ContextLabel,
         cwd: PathBuf,
         limits: ScanLimits,
-        network: NetworkPolicy,
+        options: ScanOptions,
     ) -> Context {
         let home = dirs::home_dir();
         let git = git::discover(&cwd);
@@ -208,7 +190,7 @@ impl Context {
             env: EnvSnapshot::capture(),
             git,
             limits,
-            network,
+            options,
             discovery_roots,
         }
     }
