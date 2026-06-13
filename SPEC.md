@@ -117,7 +117,9 @@ If an HTTP request is used instead of a bare TLS connect, headers must be boring
 
 ## 6. Product shape
 
-Commands: `scan` (default), `compare`, `report`, `dashboard`, `score`, `self-test-redaction`, `version`. Bare `blastradius` ≡ `blastradius scan`. (`dashboard [--ai]` — the existing reachable-surface web UI, plus the §23 three-tab session view when a trace is supplied; `score` — the §23 session blast-radius scoring layer: `blastradius score [--baseline baseline.json] [--trace trace.json]`, implicit-live form `blastradius score traces/risky.json`, CI gating `--fail-on-score` reusing exit code 4. `session -- <cmd>` is a future live-wrap variant.)
+Commands (shipped): `scan` (default), `compare`, `report`, `dashboard`, `self-test-redaction`, `version`. Bare `blastradius` ≡ `blastradius scan`. `dashboard [--ai]` is the shipped single-page reachable-surface web UI plus opt-in AI attack-scenario narratives.
+
+Commands (specced, **post-MVP — not yet built**, §23–§24): `score` — the session blast-radius scoring layer (`blastradius score [--baseline baseline.json] [--trace trace.json]`, implicit-live form `blastradius score traces/risky.json`, CI gating `--fail-on-score` reusing exit code 4); the `dashboard` **three-tab session view** (Tabs 2–3) when a trace is supplied; `sessions` / `audit-history` (transcript ingestion + retro-hazard); and a future `session -- <cmd>` live wrap. None of these exist in the tree yet — `src/session/` and a `score` command are design only (verified §24.0).
 
 **`scan`** — run the battery once against the current context.
 Flags: `--report` `--json` `--markdown` `--output <dir>` `--no-egress` `--offline` `--egress-url <host:port>` `--check-metadata` `--max-depth <n>` `--max-repos <n>` `--home-wide` `--verbose` `--fail-on <severity>`.
@@ -206,8 +208,8 @@ src/
   compare/  { mod.rs worktree.rs diff.rs }
   analyze/  { mod.rs openai.rs }                  # AI explain-only (dashboard --ai, score --ai)
   dashboard/{ mod.rs page.rs }                    # local web UI (three-tab session view, §23)
-  session/  { mod.rs trace.rs normalize.rs classify.rs
-              score.rs toxic_combinations.rs report.rs }  # §23 runtime overlay (scoring)
+  session/  { mod.rs trace.rs normalize.rs classify.rs           # PLANNED — does NOT exist yet
+              score.rs toxic_combinations.rs report.rs }         # §23–§24 runtime overlay, post-MVP (§24.0)
   util/     { paths.rs git.rs parse.rs net.rs read.rs command.rs fs_budget.rs }
 tests/      { redaction.rs fixtures/ }
 ```
@@ -297,7 +299,9 @@ Traversal can be expensive and invasive — make limits explicit.
 
 **Shipped since MVP (`✔`)** — the credential surface is now a **spec-driven store family** (`src/probes/store.rs`: one `StoreSpec` per store, run by one engine; add a store = add a data entry, see `src/probes/registry.rs`): npm/pypi/cargo tokens · Docker registry auth · kubeconfig cluster/context names · GCP/Azure config · HashiCorp Vault · Terraform Cloud · `.pgpass` hosts · GPG secret-key count. Plus bespoke probes: ssh-agent socket reachability (loaded-identity count) · dangerous git-config exec/redirect directives · writable Claude Code control & instruction surface · cloud-metadata reachability · Linux `/proc/*/environ` same-user exposure · writable shell rc · git-hooks writability.
 
-**Also shipped** — browser session/cookie stores · cron/systemd-timer enumeration · ptrace/memory-introspection + `/proc/*/cmdline` secrets · reachable localhost datastores · local privilege escalation (groups + NOPASSWD sudo) · gpg-agent reach · network-config tampering · editor/login exec dotfiles · ~35-store credential family (build-tool/data/secrets-manager/VPN/mail/etc.) · **three-tab session dashboard** (`dashboard [--ai] [--trace <file>] [--baseline <file>] [--live]`) — Tab 1 Reachable Surface (ambient map), Tab 2 Session Timeline, Tab 3 Blast Radius & Response (toxic combinations, recommended actions, containment simulator, live risk meter, optional PreToolUse block); `--ai` narratives are explain-only over the engine's grounded evidence (§23). See `docs/claude-code-security-model.md §6a` for the full coverage map.
+**Also shipped** — browser session/cookie stores · cron/systemd-timer enumeration · ptrace/memory-introspection + `/proc/*/cmdline` secrets · reachable localhost datastores · local privilege escalation (groups + NOPASSWD sudo) · gpg-agent reach · network-config tampering · editor/login exec dotfiles · ~35-store credential family (build-tool/data/secrets-manager/VPN/mail/etc.) · **single-page AI dashboard** (`dashboard [--ai]`) — the reachable-surface inventory as a self-contained local web page (radial blast-radius map, severity tiles, full inventory) plus opt-in AI attack-scenario narratives. See `docs/claude-code-security-model.md §6a` for the full coverage map.
+
+**Specced but NOT built — post-MVP (`○`, §23–§24).** The session blast-radius **scoring layer** (the `score` command and `src/session/`), the **three-tab session dashboard view** (Session Timeline + Blast Radius & Response: toxic combinations, recommended actions, containment simulator, live risk meter, optional PreToolUse block), and **automatic transcript ingestion + retro-hazard detection** are **design only**: `src/session/` and a `score` command do **not** exist in the tree today (verified §24.0). The shipped `dashboard` is the single-page AI view above; the reachable-surface inventory remains the product and the §22 contract.
 
 **Post-MVP (`○`)** — sibling-repo remote inventory · benchmark matrix · browser-key decryption-key reachability · desktop-app (Slack/Discord/Thunderbird) local state.
 
