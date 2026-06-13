@@ -284,9 +284,16 @@ pub fn build_session_report(trace: &SessionTrace, baseline: &[Finding]) -> Sessi
     }
 }
 
-/// Rank discovered sessions by blast-radius `risk_score` (desc), deterministic
-/// tiebreak on `session_id`, and return the top `top_n` as full `SessionReport`s.
-/// This is the first-class session ranking the dashboard's top-N view renders.
+/// Rank discovered sessions for the dashboard's top-N view as a **distinct-risk**
+/// set: maximize both score *uniqueness* and the *top* scores. Many heavy sessions
+/// tie at the 100 cap, so showing the literal top-N would render N identical "100"s.
+/// Instead we collapse to ONE representative per distinct `risk_score` — the worst
+/// example at that level (most toxic paths, then largest weight magnitude) — and
+/// take the N highest distinct scores. The result is a strictly-descending spread
+/// (e.g. 100, 92, 81, …), each card the scariest session at its risk level.
+///
+/// If fewer than `top_n` distinct scores exist, returns all of them (fewer cards)
+/// rather than padding with duplicate-score sessions, which would defeat the point.
 pub fn rank_sessions(
     traces: &[SessionTrace],
     baseline: &[Finding],
@@ -296,10 +303,9 @@ pub fn rank_sessions(
         .iter()
         .map(|t| build_session_report(t, baseline))
         .collect();
-    // `risk_score` clamps at 100, so many heavy sessions tie at the cap. Rank with
-    // a composite that keeps resolution past the cap: score, then number of
-    // distinct toxic paths, then raw (un-clamped) weight magnitude, then a
-    // deterministic id tiebreak. This gives a clean, stable 1..N ordering.
+    // Worst-first composite: score, then # toxic paths, then raw (un-clamped)
+    // weight magnitude, then a deterministic id tiebreak. Within a score, the
+    // first entry is the most illustrative session (becomes that score's rep).
     let key = |r: &SessionReport| -> (u8, usize, i64) {
         let raw: i64 = r.reasons.iter().map(|x| x.weight as i64).sum();
         (r.risk_score, r.toxic_combinations.len(), raw)
@@ -312,6 +318,11 @@ pub fn rank_sessions(
             .then(rb.cmp(&ra))
             .then_with(|| a.session_id.cmp(&b.session_id))
     });
+    // A "top risky sessions" view excludes sessions that scored nothing.
+    reports.retain(|r| r.risk_score > 0);
+    // Keep one representative per distinct score (equal scores are now adjacent,
+    // so dedup_by_key keeps the first = worst at that score), then take the top N.
+    reports.dedup_by_key(|r| r.risk_score);
     reports.truncate(top_n);
     reports
 }
@@ -511,6 +522,8 @@ mod tests {
         assert_eq!(report.risk_score, EXPECTED_RISKY_SCORE);
     }
 
-    /// Snapshot constant — see the phase report for the derivation.
-    const EXPECTED_RISKY_SCORE: u8 = 100;
+    /// Snapshot constant — the risky fixture sits in the soft-saturation tail
+    /// (§23.6): a heavy session asymptotes toward 100 (here 99) rather than
+    /// hard-pinning, which is what lets the ranking tell the worst sessions apart.
+    const EXPECTED_RISKY_SCORE: u8 = 99;
 }

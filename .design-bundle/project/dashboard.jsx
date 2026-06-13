@@ -606,7 +606,7 @@ function RankedSessions() {
               <span className="mono" style={{ fontSize: 10, fontWeight: 600, color: "var(--safe)", border: "1px solid var(--safe)",
                 padding: "2px 8px", borderRadius: 5, letterSpacing: 0.5 }}>from your scan</span>
             </div>
-            <div className="mono" style={{ fontSize: 11, color: "var(--txt-dim)" }}>session blast-radius score · top {sessions.length} ranked</div>
+            <div className="mono" style={{ fontSize: 11, color: "var(--txt-dim)" }}>session blast-radius score · top {sessions.length} by distinct risk</div>
           </div>
         </div>
       </div>

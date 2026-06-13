@@ -843,7 +843,9 @@ escalation_amplifier       1.0 .. 1.5   (driven by host.privilege_escalation / h
                                          1.5 when escalation is reachable AND the session ran a shell_command)
 ```
 
-**Formula:** `risk_score = clamp( base_sum × Π(active multipliers), 0, 100 )` — **capped 0..100.**
+**Formula:** `risk_score = saturate( base_sum × Π(active multipliers) )`, mapped to 0..100 with a **soft tail**: identity up to `T = 75` (Low/Medium/High bands unchanged), then `T + (100-T)·(1 − e^−(raw−T)/S)` (`S = 130`) above it, asymptotic to 100. A plain hard clamp pinned every active session on a high-ambient-risk machine to a flat 100; the soft tail spreads the worst sessions across ~80..99 so the **distinct-risk ranking** (below) can tell them apart.
+
+**Ranking (dashboard top-N).** The session view shows a **distinct-risk** set: one representative per distinct `risk_score` (the worst example at that level — most toxic paths, then largest weight magnitude), taking the N highest distinct scores. This maximizes both score uniqueness and the top scores, instead of rendering N identical 100s. Sessions scoring 0 are excluded.
 
 **The ambitious upgrade — score toxic combinations (PATHS), not isolated events.** When
 both legs of a §23.8 combination are present, the combination is emitted and contributes a

@@ -62,6 +62,27 @@ pub fn clamp_score(raw: f64) -> u8 {
     raw.round().clamp(0.0, 100.0) as u8
 }
 
+/// Map a raw additive×multiplier score into `0..=100` with a **soft tail** above
+/// the critical threshold instead of a hard clamp. Up to `T = 75` the mapping is
+/// the identity (so the Low/Medium/High bands and §23.6 semantics are unchanged);
+/// above `T` it saturates smoothly toward 100 (`score = T + (100-T)·(1 - e^-(raw-T)/S)`).
+/// Without this, every active session on a high-ambient-risk machine pins to a flat
+/// 100; with it, the worst sessions spread across ~80..99 so a ranking can tell
+/// them apart. Asymptotic — it approaches but never hard-pins 100.
+pub fn saturate_score(raw: f64) -> u8 {
+    const T: f64 = 75.0;
+    const S: f64 = 130.0;
+    if raw <= 0.0 {
+        return 0;
+    }
+    let v = if raw <= T {
+        raw
+    } else {
+        T + (100.0 - T) * (1.0 - (-(raw - T) / S).exp())
+    };
+    v.round().clamp(0.0, 100.0) as u8
+}
+
 /// Path weight contribution for a combination's severity.
 fn combo_path_weight(severity: RiskLevel) -> i32 {
     match severity {
@@ -241,7 +262,9 @@ pub fn compute_score(inputs: &ScoreInputs, suppressed: &BTreeSet<String>) -> u8 
     };
     mult *= escalation;
 
-    clamp_score(base_sum as f64 * mult)
+    // Soft tail above the critical threshold so the worst sessions spread across
+    // ~80..99 instead of all hard-clamping to a flat 100 (§23.6).
+    saturate_score(base_sum as f64 * mult)
 }
 
 /// Compute the headline deterministic risk score for a session.
