@@ -127,9 +127,18 @@ fn sensitive_domain(signal: &str) -> Option<&'static str> {
 /// (no ambient anchor) survive every control.
 pub fn compute_score(inputs: &ScoreInputs, suppressed: &BTreeSet<String>) -> u8 {
     // --- surviving reasons & base sum ---
-    let mut base_sum: i32 = 0;
+    // Group surviving reasons BY SIGNAL with diminishing returns: the first
+    // occurrence of a signal counts full weight; each repeat adds only 20% of the
+    // weight, capped at +1× (so a signal maxes at 2× its base). This stops raw
+    // event COUNT from dominating — e.g. 551 shell commands no longer contribute
+    // +5510 (it caps at +20), so the score reflects WHICH distinct dangerous
+    // capabilities a session exercised, not how many times. Negative weights
+    // (credits like human_approved_risky_action) apply once.
     let mut domains: BTreeSet<&'static str> = BTreeSet::new();
     let mut any_unapproved_risky = false;
+    // signal -> (base weight, occurrence count), insertion order not needed.
+    let mut by_signal: std::collections::BTreeMap<&str, (i32, i32)> =
+        std::collections::BTreeMap::new();
 
     for r in &inputs.classification.reasons {
         // Drop a reason whose ambient anchor was suppressed.
@@ -138,13 +147,25 @@ pub fn compute_score(inputs: &ScoreInputs, suppressed: &BTreeSet<String>) -> u8 
                 continue;
             }
         }
-        base_sum += r.weight;
+        let e = by_signal.entry(r.signal.as_str()).or_insert((r.weight, 0));
+        e.1 += 1;
         if let Some(d) = sensitive_domain(&r.signal) {
             domains.insert(d);
             if r.signal != "human_approved_risky_action" {
                 any_unapproved_risky = true;
             }
         }
+    }
+
+    let mut base_sum: i32 = 0;
+    for (weight, count) in by_signal.values() {
+        if *weight < 0 {
+            base_sum += *weight; // credits apply once, no repeat scaling
+            continue;
+        }
+        let repeats = (*count - 1).max(0) as f64;
+        let bonus = (repeats * 0.20 * (*weight as f64)).min(*weight as f64);
+        base_sum += *weight + bonus.round() as i32;
     }
 
     // --- surviving toxic-combination path weights ---

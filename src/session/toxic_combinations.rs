@@ -108,10 +108,15 @@ fn build_catalog() -> Vec<ToxicCombinationRule> {
             name: "source_control_mutation_path",
             title: "Source-control mutation path",
             event_triggers: vec!["git_write"],
-            finding_triggers: FindingTrigger::All(vec!["ssh.agent_socket", "git.push_likelihood"]),
+            // `git.push_likelihood` already encodes a WORKING push credential
+            // (readable ssh key, gh/credential-store token, or a live ssh-agent),
+            // so it is the single required leg. Requiring `ssh.agent_socket` on top
+            // wrongly marked the path "remediated" whenever the agent was down even
+            // though push was still fully reachable via the readable keys.
+            finding_triggers: FindingTrigger::All(vec!["git.push_likelihood"]),
             severity: RiskLevel::High,
-            derived_path: "a git-write action composes with armed ssh-agent + push reach",
-            evidence_template: "git-write action with ssh-agent and push reachability",
+            derived_path: "a git-write action composes with reachable push credentials",
+            evidence_template: "git-write action with reachable push credentials",
             escalation: false,
             status: Status::Experimental,
             version: 1,

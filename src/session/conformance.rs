@@ -178,22 +178,26 @@ fn fixtures_for(rule_name: &str) -> Vec<RuleFixture> {
         ],
         "source_control_mutation_path" => vec![
             RuleFixture {
-                name: "scm: git push with armed ssh-agent + push reach",
+                // push reachable via a readable key (no live ssh-agent needed) —
+                // git.push_likelihood is the single required leg.
+                name: "scm: git push with push reachability (no agent needed)",
                 verdict: Verdict::Match,
-                events: vec![AgentEvent::ShellCommand { command: "git push origin main".into() }],
-                baseline: vec![
-                    present_finding("ssh.agent_socket", FindingClass::Credentials, FindingScope::Ambient),
-                    present_finding("git.push_likelihood", FindingClass::GitWrite, FindingScope::Ambient),
-                ],
-                expect_rules: vec!["source_control_mutation_path"],
-            },
-            RuleFixture {
-                name: "scm: git push but ssh-agent leg absent",
-                verdict: Verdict::NoMatch,
                 events: vec![AgentEvent::ShellCommand { command: "git push origin main".into() }],
                 baseline: vec![present_finding(
                     "git.push_likelihood",
                     FindingClass::GitWrite,
+                    FindingScope::Ambient,
+                )],
+                expect_rules: vec!["source_control_mutation_path"],
+            },
+            RuleFixture {
+                // git-write but push is NOT reachable (no working credential) — no path.
+                name: "scm: git push but push not reachable",
+                verdict: Verdict::NoMatch,
+                events: vec![AgentEvent::ShellCommand { command: "git push origin main".into() }],
+                baseline: vec![present_finding(
+                    "ssh.agent_socket",
+                    FindingClass::Credentials,
                     FindingScope::Ambient,
                 )],
                 expect_rules: vec![],
@@ -275,7 +279,9 @@ fn fixtures_for(rule_name: &str) -> Vec<RuleFixture> {
                     FindingClass::GitWrite,
                     FindingScope::Ambient,
                 )],
-                expect_rules: vec!["production_deployment_path"],
+                // Editing a tracked deploy file with push reachable is BOTH a
+                // production-deployment path and a source-control mutation path.
+                expect_rules: vec!["production_deployment_path", "source_control_mutation_path"],
             },
             RuleFixture {
                 name: "deploy: workflow edit but no push reach",
