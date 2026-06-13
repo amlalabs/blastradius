@@ -284,6 +284,38 @@ pub fn build_session_report(trace: &SessionTrace, baseline: &[Finding]) -> Sessi
     }
 }
 
+/// Rank discovered sessions by blast-radius `risk_score` (desc), deterministic
+/// tiebreak on `session_id`, and return the top `top_n` as full `SessionReport`s.
+/// This is the first-class session ranking the dashboard's top-N view renders.
+pub fn rank_sessions(
+    traces: &[SessionTrace],
+    baseline: &[Finding],
+    top_n: usize,
+) -> Vec<SessionReport> {
+    let mut reports: Vec<SessionReport> = traces
+        .iter()
+        .map(|t| build_session_report(t, baseline))
+        .collect();
+    // `risk_score` clamps at 100, so many heavy sessions tie at the cap. Rank with
+    // a composite that keeps resolution past the cap: score, then number of
+    // distinct toxic paths, then raw (un-clamped) weight magnitude, then a
+    // deterministic id tiebreak. This gives a clean, stable 1..N ordering.
+    let key = |r: &SessionReport| -> (u8, usize, i64) {
+        let raw: i64 = r.reasons.iter().map(|x| x.weight as i64).sum();
+        (r.risk_score, r.toxic_combinations.len(), raw)
+    };
+    reports.sort_by(|a, b| {
+        let (sa, ta, ra) = key(a);
+        let (sb, tb, rb) = key(b);
+        sb.cmp(&sa)
+            .then(tb.cmp(&ta))
+            .then(rb.cmp(&ra))
+            .then_with(|| a.session_id.cmp(&b.session_id))
+    });
+    reports.truncate(top_n);
+    reports
+}
+
 /// Render a `SessionReport` as a value-free terminal block (Layer-2 swept).
 ///
 /// The number is **always** paired with the decomposed `reasons[]` and their

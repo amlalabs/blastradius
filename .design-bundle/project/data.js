@@ -528,10 +528,14 @@
   const REVIEW_GAPS = HAS_HISTORY ? (D.history.review_gaps || []).map(mapReviewGap) : REVIEW_GAPS_FIXTURE;
   const AGENTS_DISCOVERED = HAS_HISTORY ? rosterFromHistory(D.history) : AGENTS_DISCOVERED_FIXTURE;
 
+  // §23 real ranked sessions (top-N) from the engine; null → demo fallback.
+  const SESSIONS_RANKED = (D.sessions && D.sessions.ranked && D.sessions.ranked.length)
+    ? D.sessions.ranked : null;
+
   window.BR = {
     RINGS, LIVE_RINGS, FINDINGS, SESSIONS, COMBOS, CONTROLS, LADDER, RESIDUAL,
     AGENTS_DISCOVERED, REMEDIATIONS, HAZARDS, REVIEW_GAPS, retroResolve,
-    HAS_HISTORY,
+    HAS_HISTORY, SESSIONS_RANKED,
     counts, levelOf, simulate,
     BREADTH: {
       probes: (D.stats && D.stats.breadth && D.stats.breadth.probes) || 35,

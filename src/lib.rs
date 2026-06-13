@@ -294,7 +294,7 @@ fn run_dashboard(args: DashboardArgs) -> Result<i32> {
     // value-free HistoryAuditReport so the retro section renders the user's REAL
     // history. (If no transcripts are found, the report is empty and the page
     // falls back to the labeled illustrative fixture.)
-    let history = {
+    let (history, sessions) = {
         let baseline = findings.clone();
         let cfg = discovery_config();
         let (traces, diagnostics) = discover_traces_and_diagnostics(&cfg);
@@ -309,13 +309,24 @@ fn run_dashboard(args: DashboardArgs) -> Result<i32> {
             .iter()
             .filter(|h| matches!(h.status, crate::session::retro::HazardStatus::StillReachable))
             .count();
+        // §23 session-score section: rank the discovered sessions by blast-radius
+        // score and render the top 10, each showing HOW it's risky (value-free).
+        let ranked = crate::session::report::rank_sessions(&traces, &baseline, 10);
+        let top = ranked.first().map(|r| r.risk_score).unwrap_or(0);
         eprintln!(
-            "  ▸ retro-hazard scan: {} transcript(s) → {} ranked hazard(s), {} still reachable (value-free)",
+            "  ▸ retro-hazard scan: {} transcript(s) → {} ranked hazard(s), {} still reachable; \
+             top session score {} (value-free)",
             traces.len(),
             report.hazards.len(),
-            live
+            live,
+            top
         );
-        Some(report)
+        let sessions = if ranked.is_empty() {
+            None
+        } else {
+            Some(dashboard::session_cards(&ranked))
+        };
+        (Some(report), sessions)
     };
 
     let report = RunReport {
@@ -342,6 +353,7 @@ fn run_dashboard(args: DashboardArgs) -> Result<i32> {
             open_browser: !args.no_open,
             analysis,
             history,
+            sessions,
         },
     )?;
     Ok(exit::SUCCESS)
@@ -972,7 +984,7 @@ pub fn self_test_redaction() -> Result<i32> {
     // payload and the full HTML page, then subject it to the same canary-leak +
     // secret-shape checks as the other renderers.
     let ai_none: std::result::Result<Option<crate::analyze::Analysis>, String> = Ok(None);
-    let dash = crate::dashboard::render_html(&crate::dashboard::build_data(&report, &ai_none, None));
+    let dash = crate::dashboard::render_html(&crate::dashboard::build_data(&report, &ai_none, None, None));
 
     let mut failures = Vec::new();
     for (name, rendered) in [
@@ -1250,7 +1262,7 @@ fn self_test_transcripts() -> std::result::Result<String, Vec<String>> {
     // Inject the REAL history into the dashboard payload so the D.history channel
     // (and the rendered page that consumes it) is exercised end-to-end, exactly
     // as `dashboard --history` serves it.
-    let dash_data = crate::dashboard::build_data(&dash_report, &ai_none, Some(&history));
+    let dash_data = crate::dashboard::build_data(&dash_report, &ai_none, Some(&history), None);
     let dash_data_str = serde_json::to_string(&dash_data).unwrap_or_default();
     let history_json_payload = render_history_json(&history); // the D.history payload bytes
     let dash_html = crate::dashboard::render_html(&dash_data);

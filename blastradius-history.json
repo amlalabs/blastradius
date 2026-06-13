@@ -1,0 +1,926 @@
+{
+  "hazards": [
+    {
+      "hazard_id": "c440914d24a12bcc",
+      "combination": {
+        "name": "exfiltration_path",
+        "severity": "critical",
+        "evidence": [
+          "read a credential store and an egress path is reachable",
+          "ambient leg present: egress.connectivity"
+        ]
+      },
+      "session": {
+        "session_id": "07ae1426-d893-4881-8f57-8bfe251ff1fb",
+        "agent": "claude-code",
+        "repo": "totalis-mm",
+        "source_kind": "jsonl_claude",
+        "source_label": "claude-code session",
+        "started_at": "2026-05-25T18:41:35.844Z",
+        "event_at": "2026-05-25T18:41:35.844Z",
+        "event_count": 60,
+        "time_source": "event_timestamp"
+      },
+      "reachability": {
+        "legs": [
+          {
+            "finding_ref": "egress.connectivity",
+            "required": true,
+            "current": {
+              "severity": "exposed",
+              "scope": "Network",
+              "confidence": "confirmed"
+            },
+            "durable": true
+          },
+          {
+            "finding_ref": "aws.credentials.profiles",
+            "required": false,
+            "current": {
+              "severity": "info",
+              "scope": "Ambient",
+              "confidence": "confirmed"
+            },
+            "durable": true
+          },
+          {
+            "finding_ref": "env.secret_names",
+            "required": false,
+            "current": {
+              "severity": "info",
+              "scope": "Ambient",
+              "confidence": "confirmed"
+            },
+            "durable": true
+          },
+          {
+            "finding_ref": "ssh.private_keys",
+            "required": false,
+            "current": {
+              "severity": "exposed",
+              "scope": "Ambient",
+              "confidence": "confirmed"
+            },
+            "durable": true
+          },
+          {
+            "finding_ref": "git.credential_store",
+            "required": false,
+            "current": {
+              "severity": "info",
+              "scope": "Ambient",
+              "confidence": "confirmed"
+            },
+            "durable": true
+          },
+          {
+            "finding_ref": "browser.session_stores",
+            "required": false,
+            "current": {
+              "severity": "exposed",
+              "scope": "Ambient",
+              "confidence": "confirmed"
+            },
+            "durable": true
+          }
+        ],
+        "still_reachable_count": 3,
+        "remediated_count": 0,
+        "all_required_present": true
+      },
+      "recency": {
+        "age_days": 19.048541666666665,
+        "decay": 0.38941756941752736,
+        "ts_basis": "event_timestamp"
+      },
+      "status": "still_reachable",
+      "exit_in_session": true,
+      "ordering": "secret_read_precedes_egress",
+      "realized_score": 45,
+      "summary": "a session 19 days ago activated the exfiltration_path path; composes with an egress path observed in the same session; 3 of 1 required leg(s) are STILL reachable.",
+      "recommended_actions": [
+        "rotate the still-reachable credential store",
+        "restrict egress (no_egress) for agent sessions"
+      ]
+    },
+    {
+      "hazard_id": "abd5a099c10d9378",
+      "combination": {
+        "name": "exfiltration_path",
+        "severity": "critical",
+        "evidence": [
+          "read a credential store and an egress path is reachable",
+          "ambient leg present: egress.connectivity"
+        ]
+      },
+      "session": {
+        "session_id": "b7ce1079-2ed9-4634-92c9-47566e3a85f2",
+        "agent": "claude-code",
+        "repo": "call-my-agent-hackathon",
+        "source_kind": "jsonl_claude",
+        "source_label": "claude-code session",
+        "started_at": "2026-05-17T17:18:53.722Z",
+        "event_at": "2026-05-17T17:18:53.722Z",
+        "event_count": 122,
+        "time_source": "event_timestamp"
+      },
+      "reachability": {
+        "legs": [
+          {
+            "finding_ref": "egress.connectivity",
+            "required": true,
+            "current": {
+              "severity": "exposed",
+              "scope": "Network",
+              "confidence": "confirmed"
+            },
+            "durable": true
+          },
+          {
+            "finding_ref": "aws.credentials.profiles",
+            "required": false,
+            "current": {
+              "severity": "info",
+              "scope": "Ambient",
+              "confidence": "confirmed"
+            },
+            "durable": true
+          },
+          {
+            "finding_ref": "env.secret_names",
+            "required": false,
+            "current": {
+              "severity": "info",
+              "scope": "Ambient",
+              "confidence": "confirmed"
+            },
+            "durable": true
+          },
+          {
+            "finding_ref": "ssh.private_keys",
+            "required": false,
+            "current": {
+              "severity": "exposed",
+              "scope": "Ambient",
+              "confidence": "confirmed"
+            },
+            "durable": true
+          },
+          {
+            "finding_ref": "git.credential_store",
+            "required": false,
+            "current": {
+              "severity": "info",
+              "scope": "Ambient",
+              "confidence": "confirmed"
+            },
+            "durable": true
+          },
+          {
+            "finding_ref": "browser.session_stores",
+            "required": false,
+            "current": {
+              "severity": "exposed",
+              "scope": "Ambient",
+              "confidence": "confirmed"
+            },
+            "durable": true
+          }
+        ],
+        "still_reachable_count": 3,
+        "remediated_count": 0,
+        "all_required_present": true
+      },
+      "recency": {
+        "age_days": 27.10597222222222,
+        "decay": 0.2613145075586392,
+        "ts_basis": "event_timestamp"
+      },
+      "status": "still_reachable",
+      "exit_in_session": true,
+      "ordering": "egress_precedes_secret_read",
+      "realized_score": 30,
+      "summary": "a session 27 days ago activated the exfiltration_path path; composes with an egress path observed in the same session; 3 of 1 required leg(s) are STILL reachable.",
+      "recommended_actions": [
+        "rotate the still-reachable credential store",
+        "restrict egress (no_egress) for agent sessions"
+      ]
+    },
+    {
+      "hazard_id": "347734e5220d8824",
+      "combination": {
+        "name": "exfiltration_path",
+        "severity": "critical",
+        "evidence": [
+          "read a credential store and an egress path is reachable",
+          "ambient leg present: egress.connectivity"
+        ]
+      },
+      "session": {
+        "session_id": "3da55ec5-a5b5-45ef-bfbf-5351c4a60c28",
+        "agent": "claude-code",
+        "repo": "call-my-agent-hackathon",
+        "source_kind": "jsonl_claude",
+        "source_label": "claude-code session",
+        "started_at": "2026-05-17T16:51:22.963Z",
+        "event_at": "2026-05-17T16:51:22.963Z",
+        "event_count": 1209,
+        "time_source": "event_timestamp"
+      },
+      "reachability": {
+        "legs": [
+          {
+            "finding_ref": "egress.connectivity",
+            "required": true,
+            "current": {
+              "severity": "exposed",
+              "scope": "Network",
+              "confidence": "confirmed"
+            },
+            "durable": true
+          },
+          {
+            "finding_ref": "aws.credentials.profiles",
+            "required": false,
+            "current": {
+              "severity": "info",
+              "scope": "Ambient",
+              "confidence": "confirmed"
+            },
+            "durable": true
+          },
+          {
+            "finding_ref": "env.secret_names",
+            "required": false,
+            "current": {
+              "severity": "info",
+              "scope": "Ambient",
+              "confidence": "confirmed"
+            },
+            "durable": true
+          },
+          {
+            "finding_ref": "ssh.private_keys",
+            "required": false,
+            "current": {
+              "severity": "exposed",
+              "scope": "Ambient",
+              "confidence": "confirmed"
+            },
+            "durable": true
+          },
+          {
+            "finding_ref": "git.credential_store",
+            "required": false,
+            "current": {
+              "severity": "info",
+              "scope": "Ambient",
+              "confidence": "confirmed"
+            },
+            "durable": true
+          },
+          {
+            "finding_ref": "browser.session_stores",
+            "required": false,
+            "current": {
+              "severity": "exposed",
+              "scope": "Ambient",
+              "confidence": "confirmed"
+            },
+            "durable": true
+          }
+        ],
+        "still_reachable_count": 3,
+        "remediated_count": 0,
+        "all_required_present": true
+      },
+      "recency": {
+        "age_days": 27.125081018518518,
+        "decay": 0.26106739839334614,
+        "ts_basis": "event_timestamp"
+      },
+      "status": "still_reachable",
+      "exit_in_session": true,
+      "ordering": "egress_precedes_secret_read",
+      "realized_score": 30,
+      "summary": "a session 27 days ago activated the exfiltration_path path; composes with an egress path observed in the same session; 3 of 1 required leg(s) are STILL reachable.",
+      "recommended_actions": [
+        "rotate the still-reachable credential store",
+        "restrict egress (no_egress) for agent sessions"
+      ]
+    },
+    {
+      "hazard_id": "e9f9743e739958a7",
+      "combination": {
+        "name": "source_control_mutation_path",
+        "severity": "high",
+        "evidence": [
+          "git-write action with ssh-agent and push reachability",
+          "ambient leg present: ssh.agent_socket",
+          "ambient leg present: git.push_likelihood"
+        ]
+      },
+      "session": {
+        "session_id": "9c5f240d-382f-47d5-b89c-73ccb6b836ee",
+        "agent": "claude-code",
+        "repo": "blastradius",
+        "source_kind": "jsonl_claude",
+        "source_label": "claude-code session",
+        "started_at": "2026-06-13T16:43:44.496Z",
+        "event_at": "2026-06-13T16:43:44.496Z",
+        "event_count": 8,
+        "time_source": "event_timestamp"
+      },
+      "reachability": {
+        "legs": [
+          {
+            "finding_ref": "ssh.agent_socket",
+            "required": true,
+            "current": {
+              "severity": "info",
+              "scope": "Ambient",
+              "confidence": "confirmed"
+            },
+            "durable": true
+          },
+          {
+            "finding_ref": "git.push_likelihood",
+            "required": true,
+            "current": {
+              "severity": "exposed",
+              "scope": "CurrentRepo",
+              "confidence": "likely"
+            },
+            "durable": false
+          }
+        ],
+        "still_reachable_count": 1,
+        "remediated_count": 1,
+        "all_required_present": false
+      },
+      "recency": {
+        "age_days": 0.13038194444444445,
+        "decay": 0.9935655135979421,
+        "ts_basis": "event_timestamp"
+      },
+      "status": "remediated_since",
+      "exit_in_session": false,
+      "realized_score": 6,
+      "summary": "a session today activated the source_control_mutation_path path; a required leg is no longer reachable (remediated since).",
+      "recommended_actions": [
+        "no live action required; retained for historical visibility"
+      ]
+    },
+    {
+      "hazard_id": "de04827c378ac5bd",
+      "combination": {
+        "name": "source_control_mutation_path",
+        "severity": "high",
+        "evidence": [
+          "git-write action with ssh-agent and push reachability",
+          "ambient leg present: ssh.agent_socket",
+          "ambient leg present: git.push_likelihood"
+        ]
+      },
+      "session": {
+        "session_id": "6e8477e2-d49b-4847-8f9f-1dd3d720db7b",
+        "agent": "claude-code",
+        "repo": "blastradius",
+        "source_kind": "jsonl_claude",
+        "source_label": "claude-code session",
+        "started_at": "2026-06-12T21:08:05.174Z",
+        "event_at": "2026-06-12T21:08:05.174Z",
+        "event_count": 388,
+        "time_source": "event_timestamp"
+      },
+      "reachability": {
+        "legs": [
+          {
+            "finding_ref": "ssh.agent_socket",
+            "required": true,
+            "current": {
+              "severity": "info",
+              "scope": "Ambient",
+              "confidence": "confirmed"
+            },
+            "durable": true
+          },
+          {
+            "finding_ref": "git.push_likelihood",
+            "required": true,
+            "current": {
+              "severity": "exposed",
+              "scope": "CurrentRepo",
+              "confidence": "likely"
+            },
+            "durable": false
+          }
+        ],
+        "still_reachable_count": 1,
+        "remediated_count": 1,
+        "all_required_present": false
+      },
+      "recency": {
+        "age_days": 0.9468055555555556,
+        "decay": 0.954204921042237,
+        "ts_basis": "event_timestamp"
+      },
+      "status": "remediated_since",
+      "exit_in_session": true,
+      "realized_score": 6,
+      "summary": "a session 1 day ago activated the source_control_mutation_path path; composes with an egress path observed in the same session; a required leg is no longer reachable (remediated since).",
+      "recommended_actions": [
+        "no live action required; retained for historical visibility"
+      ]
+    },
+    {
+      "hazard_id": "7c8f3a1d132e348c",
+      "combination": {
+        "name": "source_control_mutation_path",
+        "severity": "high",
+        "evidence": [
+          "git-write action with ssh-agent and push reachability",
+          "ambient leg present: ssh.agent_socket",
+          "ambient leg present: git.push_likelihood"
+        ]
+      },
+      "session": {
+        "session_id": "b0592dfb-07b8-47bc-bb4d-8e2c42f19ef2",
+        "agent": "claude-code",
+        "repo": "amlalabs",
+        "source_kind": "jsonl_claude",
+        "source_label": "claude-code session",
+        "started_at": "2026-06-08T21:34:32.854Z",
+        "event_at": "2026-06-08T21:34:32.854Z",
+        "event_count": 175,
+        "time_source": "event_timestamp"
+      },
+      "reachability": {
+        "legs": [
+          {
+            "finding_ref": "ssh.agent_socket",
+            "required": true,
+            "current": {
+              "severity": "info",
+              "scope": "Ambient",
+              "confidence": "confirmed"
+            },
+            "durable": true
+          },
+          {
+            "finding_ref": "git.push_likelihood",
+            "required": true,
+            "current": {
+              "severity": "exposed",
+              "scope": "CurrentRepo",
+              "confidence": "likely"
+            },
+            "durable": false
+          }
+        ],
+        "still_reachable_count": 1,
+        "remediated_count": 1,
+        "all_required_present": false
+      },
+      "recency": {
+        "age_days": 4.9284375,
+        "decay": 0.7834802159185789,
+        "ts_basis": "event_timestamp"
+      },
+      "status": "remediated_since",
+      "exit_in_session": true,
+      "realized_score": 5,
+      "summary": "a session 5 days ago activated the source_control_mutation_path path; composes with an egress path observed in the same session; a required leg is no longer reachable (remediated since).",
+      "recommended_actions": [
+        "no live action required; retained for historical visibility"
+      ]
+    },
+    {
+      "hazard_id": "2b17a272e180dfc2",
+      "combination": {
+        "name": "source_control_mutation_path",
+        "severity": "high",
+        "evidence": [
+          "git-write action with ssh-agent and push reachability",
+          "ambient leg present: ssh.agent_socket",
+          "ambient leg present: git.push_likelihood"
+        ]
+      },
+      "session": {
+        "session_id": "064f013a-a944-45b3-a765-63186c1cb229",
+        "agent": "claude-code",
+        "repo": "call-my-agent-hackathon",
+        "source_kind": "jsonl_claude",
+        "source_label": "claude-code session",
+        "started_at": "2026-05-17T20:40:25.290Z",
+        "event_at": "2026-05-17T20:40:25.290Z",
+        "event_count": 88,
+        "time_source": "event_timestamp"
+      },
+      "reachability": {
+        "legs": [
+          {
+            "finding_ref": "ssh.agent_socket",
+            "required": true,
+            "current": {
+              "severity": "info",
+              "scope": "Ambient",
+              "confidence": "confirmed"
+            },
+            "durable": true
+          },
+          {
+            "finding_ref": "git.push_likelihood",
+            "required": true,
+            "current": {
+              "severity": "exposed",
+              "scope": "CurrentRepo",
+              "confidence": "likely"
+            },
+            "durable": false
+          }
+        ],
+        "still_reachable_count": 1,
+        "remediated_count": 1,
+        "all_required_present": false
+      },
+      "recency": {
+        "age_days": 26.966018518518517,
+        "decay": 0.2631314905580848,
+        "ts_basis": "event_timestamp"
+      },
+      "status": "remediated_since",
+      "exit_in_session": false,
+      "realized_score": 2,
+      "summary": "a session 27 days ago activated the source_control_mutation_path path; a required leg is no longer reachable (remediated since).",
+      "recommended_actions": [
+        "no live action required; retained for historical visibility"
+      ]
+    },
+    {
+      "hazard_id": "ad187a2489fd1cc4",
+      "combination": {
+        "name": "source_control_mutation_path",
+        "severity": "high",
+        "evidence": [
+          "git-write action with ssh-agent and push reachability",
+          "ambient leg present: ssh.agent_socket",
+          "ambient leg present: git.push_likelihood"
+        ]
+      },
+      "session": {
+        "session_id": "b7ce1079-2ed9-4634-92c9-47566e3a85f2",
+        "agent": "claude-code",
+        "repo": "call-my-agent-hackathon",
+        "source_kind": "jsonl_claude",
+        "source_label": "claude-code session",
+        "started_at": "2026-05-17T17:18:53.722Z",
+        "event_at": "2026-05-17T17:18:53.722Z",
+        "event_count": 122,
+        "time_source": "event_timestamp"
+      },
+      "reachability": {
+        "legs": [
+          {
+            "finding_ref": "ssh.agent_socket",
+            "required": true,
+            "current": {
+              "severity": "info",
+              "scope": "Ambient",
+              "confidence": "confirmed"
+            },
+            "durable": true
+          },
+          {
+            "finding_ref": "git.push_likelihood",
+            "required": true,
+            "current": {
+              "severity": "exposed",
+              "scope": "CurrentRepo",
+              "confidence": "likely"
+            },
+            "durable": false
+          }
+        ],
+        "still_reachable_count": 1,
+        "remediated_count": 1,
+        "all_required_present": false
+      },
+      "recency": {
+        "age_days": 27.10597222222222,
+        "decay": 0.2613145075586392,
+        "ts_basis": "event_timestamp"
+      },
+      "status": "remediated_since",
+      "exit_in_session": true,
+      "ordering": "egress_precedes_secret_read",
+      "realized_score": 2,
+      "summary": "a session 27 days ago activated the source_control_mutation_path path; composes with an egress path observed in the same session; a required leg is no longer reachable (remediated since).",
+      "recommended_actions": [
+        "no live action required; retained for historical visibility"
+      ]
+    },
+    {
+      "hazard_id": "e92070682b93b25d",
+      "combination": {
+        "name": "source_control_mutation_path",
+        "severity": "high",
+        "evidence": [
+          "git-write action with ssh-agent and push reachability",
+          "ambient leg present: ssh.agent_socket",
+          "ambient leg present: git.push_likelihood"
+        ]
+      },
+      "session": {
+        "session_id": "3da55ec5-a5b5-45ef-bfbf-5351c4a60c28",
+        "agent": "claude-code",
+        "repo": "call-my-agent-hackathon",
+        "source_kind": "jsonl_claude",
+        "source_label": "claude-code session",
+        "started_at": "2026-05-17T16:51:22.963Z",
+        "event_at": "2026-05-17T16:51:22.963Z",
+        "event_count": 1209,
+        "time_source": "event_timestamp"
+      },
+      "reachability": {
+        "legs": [
+          {
+            "finding_ref": "ssh.agent_socket",
+            "required": true,
+            "current": {
+              "severity": "info",
+              "scope": "Ambient",
+              "confidence": "confirmed"
+            },
+            "durable": true
+          },
+          {
+            "finding_ref": "git.push_likelihood",
+            "required": true,
+            "current": {
+              "severity": "exposed",
+              "scope": "CurrentRepo",
+              "confidence": "likely"
+            },
+            "durable": false
+          }
+        ],
+        "still_reachable_count": 1,
+        "remediated_count": 1,
+        "all_required_present": false
+      },
+      "recency": {
+        "age_days": 27.125081018518518,
+        "decay": 0.26106739839334614,
+        "ts_basis": "event_timestamp"
+      },
+      "status": "remediated_since",
+      "exit_in_session": true,
+      "ordering": "egress_precedes_secret_read",
+      "realized_score": 2,
+      "summary": "a session 27 days ago activated the source_control_mutation_path path; composes with an egress path observed in the same session; a required leg is no longer reachable (remediated since).",
+      "recommended_actions": [
+        "no live action required; retained for historical visibility"
+      ]
+    }
+  ],
+  "review_gaps": [
+    {
+      "hazard_id": "e8a6e909a980f59b",
+      "combination": {
+        "name": "high_review_risk",
+        "severity": "high",
+        "evidence": [
+          "sensitive-code edit without a covering approval"
+        ]
+      },
+      "session": {
+        "session_id": "6e8477e2-d49b-4847-8f9f-1dd3d720db7b",
+        "agent": "claude-code",
+        "repo": "blastradius",
+        "source_kind": "jsonl_claude",
+        "source_label": "claude-code session",
+        "started_at": "2026-06-12T21:08:05.174Z",
+        "event_at": "2026-06-12T21:08:05.174Z",
+        "event_count": 388,
+        "time_source": "event_timestamp"
+      },
+      "reachability": {
+        "legs": [],
+        "still_reachable_count": 0,
+        "remediated_count": 0,
+        "all_required_present": true
+      },
+      "recency": {
+        "age_days": 0.9468055555555556,
+        "decay": 0.954204921042237,
+        "ts_basis": "event_timestamp"
+      },
+      "status": "review_gap",
+      "exit_in_session": true,
+      "realized_score": 36,
+      "summary": "a session 1 day ago activated the high_review_risk path; composes with an egress path observed in the same session; no covering review was recorded (review gap).",
+      "recommended_actions": [
+        "require a covering human review for sensitive-code changes"
+      ]
+    },
+    {
+      "hazard_id": "955e3f146b34c2e3",
+      "combination": {
+        "name": "high_review_risk",
+        "severity": "high",
+        "evidence": [
+          "sensitive-code edit without a covering approval"
+        ]
+      },
+      "session": {
+        "session_id": "b0592dfb-07b8-47bc-bb4d-8e2c42f19ef2",
+        "agent": "claude-code",
+        "repo": "amlalabs",
+        "source_kind": "jsonl_claude",
+        "source_label": "claude-code session",
+        "started_at": "2026-06-08T21:34:32.854Z",
+        "event_at": "2026-06-08T21:34:32.854Z",
+        "event_count": 175,
+        "time_source": "event_timestamp"
+      },
+      "reachability": {
+        "legs": [],
+        "still_reachable_count": 0,
+        "remediated_count": 0,
+        "all_required_present": true
+      },
+      "recency": {
+        "age_days": 4.9284375,
+        "decay": 0.7834802159185789,
+        "ts_basis": "event_timestamp"
+      },
+      "status": "review_gap",
+      "exit_in_session": true,
+      "realized_score": 29,
+      "summary": "a session 5 days ago activated the high_review_risk path; composes with an egress path observed in the same session; no covering review was recorded (review gap).",
+      "recommended_actions": [
+        "require a covering human review for sensitive-code changes"
+      ]
+    }
+  ],
+  "by_finding": [
+    {
+      "finding_ref": "aws.credentials.profiles",
+      "hazard_count": 3,
+      "still_reachable": false
+    },
+    {
+      "finding_ref": "browser.session_stores",
+      "hazard_count": 3,
+      "still_reachable": true
+    },
+    {
+      "finding_ref": "egress.connectivity",
+      "hazard_count": 3,
+      "still_reachable": true
+    },
+    {
+      "finding_ref": "env.secret_names",
+      "hazard_count": 3,
+      "still_reachable": false
+    },
+    {
+      "finding_ref": "git.credential_store",
+      "hazard_count": 3,
+      "still_reachable": false
+    },
+    {
+      "finding_ref": "git.push_likelihood",
+      "hazard_count": 6,
+      "still_reachable": true
+    },
+    {
+      "finding_ref": "ssh.agent_socket",
+      "hazard_count": 6,
+      "still_reachable": false
+    },
+    {
+      "finding_ref": "ssh.private_keys",
+      "hazard_count": 3,
+      "still_reachable": true
+    }
+  ],
+  "containment_simulation": {
+    "baseline_score": 9,
+    "controls": [
+      {
+        "control": "repo_only_filesystem",
+        "category": "Filesystem isolation",
+        "score": 9,
+        "reduction": 0,
+        "risk_level": "low",
+        "suppressed_findings": [
+          "browser.session_stores",
+          "credentials.shell_history",
+          "cross_repo.lateral_secrets",
+          "cross_repo.sibling_repos"
+        ],
+        "suppressed_combinations": []
+      },
+      {
+        "control": "no_egress",
+        "category": "Egress control",
+        "score": 6,
+        "reduction": 3,
+        "risk_level": "low",
+        "suppressed_findings": [
+          "egress.connectivity",
+          "egress.mediation"
+        ],
+        "suppressed_combinations": [
+          "exfiltration_path"
+        ]
+      },
+      {
+        "control": "no_ssh_agent",
+        "category": "Credential substitution (ssh-agent)",
+        "score": 3,
+        "reduction": 6,
+        "risk_level": "low",
+        "suppressed_findings": [
+          "ssh.agent_socket"
+        ],
+        "suppressed_combinations": [
+          "source_control_mutation_path"
+        ]
+      },
+      {
+        "control": "scoped_temp_cloud_creds",
+        "category": "Credential substitution",
+        "score": 9,
+        "reduction": 0,
+        "risk_level": "low",
+        "suppressed_findings": [
+          "aws.credentials.profiles",
+          "env.secret_names",
+          "git.credential_store",
+          "github.token_source"
+        ],
+        "suppressed_combinations": []
+      },
+      {
+        "control": "process_isolation",
+        "category": "Process isolation",
+        "score": 9,
+        "reduction": 0,
+        "risk_level": "low",
+        "suppressed_findings": [
+          "host.privilege_escalation",
+          "host.privileged_reachability",
+          "process.cmdline_secrets",
+          "process.memory_introspection",
+          "process.proc_environ"
+        ],
+        "suppressed_combinations": []
+      }
+    ],
+    "stacked": [
+      {
+        "score": 9,
+        "reduction": 0
+      },
+      {
+        "control": "repo_only_filesystem",
+        "score": 9,
+        "reduction": 0
+      },
+      {
+        "control": "no_egress",
+        "score": 6,
+        "reduction": 3
+      },
+      {
+        "control": "no_ssh_agent",
+        "score": 0,
+        "reduction": 6
+      },
+      {
+        "control": "scoped_temp_cloud_creds",
+        "score": 0,
+        "reduction": 0
+      },
+      {
+        "control": "process_isolation",
+        "score": 0,
+        "reduction": 0
+      }
+    ],
+    "residual_floor": 0,
+    "residual_reasons": [
+      "edited_auth_payment_security_code",
+      "toxic:high_review_risk"
+    ]
+  },
+  "discovery_diagnostics": [
+    {
+      "agent": "discovery",
+      "note": ".../2026/01/13/rollout-2026-01-13T19-31-53-019bb8d7-de48-7960-8aba-d6cc04a9c47c.jsonl: transcript over byte cap; parsed truncated prefix"
+    }
+  ]
+}

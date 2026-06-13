@@ -46,6 +46,9 @@ pub struct ServeOptions {
     /// makes the page fall back to the illustrative fixture. Value-free by
     /// construction; flows through the Layer-2 sweep.
     pub history: Option<HistoryAuditReport>,
+    /// Top-N ranked real session cards (value-free) for the session-score section;
+    /// `None` falls back to the illustrative benign/risky fixture.
+    pub sessions: Option<Value>,
 }
 
 /// The six radius rings, in FIXED outward order. The page lays them out by this
@@ -134,12 +137,85 @@ fn ring_meta(id: &str) -> (&'static str, &'static str) {
     }
 }
 
-/// Build the value-free dashboard JSON from a report (+ optional AI analysis +
-/// optional real retro `HistoryAuditReport` for Tab 4).
+/// Build the value-free top-N ranked session cards for the session-score section.
+/// Each card is the real `SessionReport` (serialized — value-free by contract,
+/// §23.9) augmented with `rank`, a value-free `label`, and `touched` (the
+/// finding ids the scored reasons point at, for constellation lighting). The
+/// decomposed `reasons[]` (signal + weight + finding_ref + evidence) and
+/// `toxic_combinations[]` ARE the illustrative "how this transcript is risky".
+pub fn session_cards(reports: &[crate::session::report::SessionReport]) -> Value {
+    let cards: Vec<Value> = reports
+        .iter()
+        .enumerate()
+        .map(|(i, r)| {
+            let mut touched: Vec<String> =
+                r.reasons.iter().filter_map(|x| x.finding_ref.clone()).collect();
+            touched.sort();
+            touched.dedup();
+            let label = format!(
+                "{} · {}",
+                r.agent,
+                r.session_id.chars().take(8).collect::<String>()
+            );
+
+            // Aggregate the per-event reasons into distinct "how it's risky" rows:
+            // group by (signal, finding_ref), count occurrences, sum the weight, and
+            // keep one value-free evidence sample. This is the illustrative breakdown
+            // of exactly how the transcript earned its score — not 100 identical rows.
+            use std::collections::BTreeMap;
+            let mut order: Vec<(String, Option<String>)> = Vec::new();
+            let mut agg: BTreeMap<(String, Option<String>), (i64, usize, String)> = BTreeMap::new();
+            let mut weight_total: i64 = 0;
+            for rs in &r.reasons {
+                weight_total += rs.weight as i64;
+                let key = (rs.signal.clone(), rs.finding_ref.clone());
+                let sample = rs.evidence.first().cloned().unwrap_or_default();
+                let e = agg.entry(key.clone()).or_insert_with(|| {
+                    order.push(key.clone());
+                    (0, 0, sample.clone())
+                });
+                e.0 += rs.weight as i64;
+                e.1 += 1;
+            }
+            let mut how: Vec<Value> = order
+                .iter()
+                .map(|k| {
+                    let (total, count, sample) = &agg[k];
+                    json!({
+                        "signal": k.0,
+                        "finding_ref": k.1,
+                        "count": count,
+                        "weight_total": total,
+                        "evidence": sample,
+                    })
+                })
+                .collect();
+            // Heaviest contributions first — the sharpest "how" at the top.
+            how.sort_by(|a, b| {
+                b["weight_total"].as_i64().unwrap_or(0).cmp(&a["weight_total"].as_i64().unwrap_or(0))
+            });
+
+            let mut card = serde_json::to_value(r).unwrap_or(Value::Null);
+            if let Some(obj) = card.as_object_mut() {
+                obj.insert("rank".into(), json!(i + 1));
+                obj.insert("label".into(), json!(label));
+                obj.insert("touched".into(), json!(touched));
+                obj.insert("how".into(), json!(how));
+                obj.insert("weight_total".into(), json!(weight_total));
+            }
+            card
+        })
+        .collect();
+    json!({ "ranked": cards })
+}
+
+/// Build the value-free dashboard JSON from a report (+ optional AI analysis,
+/// the retro `HistoryAuditReport`, and the ranked top-N session cards).
 pub fn build_data(
     report: &RunReport,
     analysis: &Result<Option<Analysis>, String>,
     history: Option<&HistoryAuditReport>,
+    sessions: Option<&Value>,
 ) -> Value {
     // The dashboard reflects the first (primary) context.
     let cr = report.contexts.first();
@@ -269,6 +345,12 @@ pub fn build_data(
             Some(h) => serde_json::to_value(h).unwrap_or(Value::Null),
             None => Value::Null,
         },
+        // §23 session-score section: the top-N ranked real sessions (value-free
+        // cards). Null falls back to the labeled illustrative benign/risky fixture.
+        "sessions": match sessions {
+            Some(s) => s.clone(),
+            None => Value::Null,
+        },
     })
 }
 
@@ -284,7 +366,7 @@ pub(crate) fn render_html(data: &Value) -> String {
 
 /// Serve the dashboard until interrupted (Ctrl-C).
 pub fn serve(report: &RunReport, opts: ServeOptions) -> Result<()> {
-    let data = build_data(report, &opts.analysis, opts.history.as_ref());
+    let data = build_data(report, &opts.analysis, opts.history.as_ref(), opts.sessions.as_ref());
     let html = render_html(&data);
 
     let listener = TcpListener::bind((opts.bind.as_str(), opts.port))
@@ -448,7 +530,7 @@ mod tests {
     #[test]
     fn html_embeds_data_and_is_swept() {
         let report = dummy_report();
-        let data = build_data(&report, &Ok(None), None);
+        let data = build_data(&report, &Ok(None), None, None);
         let html = render_html(&data);
         assert!(html.contains("AWS credentials reachable"));
         assert!(html.contains("<!doctype html>") || html.contains("<!DOCTYPE html>"));
@@ -459,7 +541,7 @@ mod tests {
     #[test]
     fn build_data_counts_reachable_classes() {
         let report = dummy_report();
-        let data = build_data(&report, &Ok(None), None);
+        let data = build_data(&report, &Ok(None), None, None);
         assert_eq!(data["stats"]["exposed"], 1);
         assert_eq!(data["stats"]["classes"][0]["label"], "CREDENTIALS");
     }
@@ -467,7 +549,7 @@ mod tests {
     #[test]
     fn build_data_emits_six_rings() {
         let report = dummy_report();
-        let data = build_data(&report, &Ok(None), None);
+        let data = build_data(&report, &Ok(None), None, None);
         let rings = data["rings"].as_array().expect("rings is an array");
         assert_eq!(rings.len(), 6, "exactly six rings");
         let ids: Vec<&str> = rings.iter().map(|r| r["id"].as_str().unwrap()).collect();
@@ -566,7 +648,7 @@ mod tests {
     #[test]
     fn stats_breadth_present() {
         let report = dummy_report();
-        let data = build_data(&report, &Ok(None), None);
+        let data = build_data(&report, &Ok(None), None, None);
         assert!(
             data["stats"]["breadth"]["probes"].is_u64(),
             "breadth.probes is an integer"
@@ -579,7 +661,7 @@ mod tests {
 
     #[test]
     fn page_has_sections_and_is_swept() {
-        let data = build_data(&dummy_report(), &Ok(None), None);
+        let data = build_data(&dummy_report(), &Ok(None), None, None);
         let html = render_html(&data);
         assert!(!crate::report::redaction::contains_secret_shaped(&html));
         assert!(html.contains("illustrative — post-MVP, not from your scan"));
@@ -637,11 +719,11 @@ mod tests {
     #[test]
     fn history_absent_emits_null_present_emits_report() {
         // Without history, D.history is null.
-        let none = build_data(&dummy_report(), &Ok(None), None);
+        let none = build_data(&dummy_report(), &Ok(None), None, None);
         assert!(none["history"].is_null(), "history is null when absent");
         // With history, D.history is the real value-free report.
         let h = sample_history();
-        let data = build_data(&dummy_report(), &Ok(None), Some(&h));
+        let data = build_data(&dummy_report(), &Ok(None), Some(&h), None);
         assert!(data["history"].is_object(), "history present when injected");
         assert!(
             !data["history"]["hazards"].as_array().unwrap().is_empty(),
@@ -656,7 +738,7 @@ mod tests {
     #[test]
     fn planted_canary_in_page_is_swept() {
         const CANARY: &str = "ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ012345";
-        let mut data = build_data(&dummy_report(), &Ok(None), None);
+        let mut data = build_data(&dummy_report(), &Ok(None), None, None);
         // Inject a shaped canary into a Value field, then run the SAME path
         // render_html uses: to_string → </ guard → marker replace → sweep.
         data["canary"] = json!(CANARY);

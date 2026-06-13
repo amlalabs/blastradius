@@ -238,8 +238,8 @@ function FindingDetail({ id, onClose }) {
   );
 }
 
-/* ============================ DASHBOARD ============================ */
-function Dashboard() {
+/* ====== DEMO fallback (illustrative benign/risky fixture, no transcripts) ====== */
+function DemoDashboard() {
   const BR = window.BR;
   const [sessionId, setSessionId] = React.useState("risky");
   const [playStep, setPlayStep] = React.useState(0);
@@ -412,4 +412,269 @@ function Dashboard() {
   );
 }
 
-Object.assign(window, { Dashboard, IllustrativeBadge, ILLUSTRATIVE_NOTE });
+/* ============================ REAL RANKED SESSIONS ============================ */
+/* Driven by D.sessions.ranked — the top-N real discovered sessions, ranked by
+ * blast-radius score in the engine (session::report::rank_sessions). Each card is
+ * a real, value-free SessionReport; the `how` rows are the aggregated breakdown of
+ * exactly how that transcript earned its score. No illustrative badge — this is
+ * the user's own data. */
+
+const SIGNAL_ICON = {
+  read_secret: "◧", network_access: "⇅", modified_production_deploy: "✎",
+  edited_auth_payment_security_code: "✎", edited_auth_payment_security: "✎",
+  dangerous_shell_pattern: "❯", shell_command: "❯", modified_dependency_manifest: "✎",
+  external_mcp_call: "⇄", human_approved_risky_action: "✓",
+};
+const signalLabel = (s) => String(s || "").replace(/_/g, " ");
+
+const CONTROL_LABEL = {
+  repo_only_filesystem: "Repo-only filesystem", no_egress: "No egress",
+  no_ssh_agent: "No ssh-agent", scoped_temp_cloud_creds: "Scoped temp creds",
+  process_isolation: "Process isolation", all_controls: "All controls",
+};
+
+/* "HOW this transcript is risky" — the aggregated scored signals. */
+function HowPanel({ how }) {
+  if (!how || !how.length) {
+    return <div className="mono" style={{ fontSize: 13, color: "var(--txt-dim)", padding: "14px 4px", lineHeight: 1.6 }}>
+      Nothing scored — the agent's actions stayed inside the denominator.
+    </div>;
+  }
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+      {how.map((h, i) => {
+        const hot = h.weight_total > 0;
+        return (
+          <div key={i} style={{ display: "grid", gridTemplateColumns: "26px 1fr auto", alignItems: "center", gap: 12,
+            padding: "9px 12px", borderRadius: 9, background: i % 2 ? "transparent" : "rgba(255,255,255,.02)" }}>
+            <span className="mono" style={{ fontSize: 15, color: hot ? "var(--hot)" : "var(--txt-dim)", textAlign: "center" }}>
+              {SIGNAL_ICON[h.signal] || "•"}
+            </span>
+            <div style={{ minWidth: 0 }}>
+              <div className="mono" style={{ fontSize: 13, color: "var(--txt)" }}>
+                {signalLabel(h.signal)}
+                {h.count > 1 && <span style={{ color: "var(--txt-dim)" }}> ×{h.count}</span>}
+              </div>
+              {h.finding_ref && <div className="mono" style={{ fontSize: 11, color: "var(--safe-deep)", marginTop: 2 }}>↳ joins {h.finding_ref}</div>}
+            </div>
+            <span className="mono" style={{ fontSize: 12, fontWeight: 700, color: hot ? "var(--hot)" : "var(--txt-dim)" }}>
+              {h.weight_total > 0 ? "+" + h.weight_total : h.weight_total}
+            </span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/* Real toxic-combination panel (from SessionReport.toxic_combinations). */
+function RealToxic({ combos, picked, onPick }) {
+  if (!combos || !combos.length) {
+    return <div className="mono" style={{ fontSize: 13, color: "var(--txt-dim)", padding: "18px 4px", lineHeight: 1.6 }}>
+      No toxic combinations — risky actions never chained with reachable findings.
+    </div>;
+  }
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      {combos.map((c) => {
+        const meta = comboMeta(c.name);
+        const sev = (c.severity || meta.sev || "high");
+        const col = sev === "critical" ? "var(--crit)" : "var(--hot)";
+        const sel = picked === c.name;
+        return (
+          <div key={c.name} onClick={() => onPick(sel ? null : c.name)}
+            style={{ border: `1px solid ${sel ? col : "var(--line-2)"}`, borderRadius: 12, padding: "14px 16px",
+              background: sel ? "rgba(255,61,87,.07)" : "var(--surface)", cursor: "pointer", transition: "all .2s" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+              <span style={{ fontWeight: 600, fontSize: 15 }}>{meta.title || c.name}</span>
+              <span className="mono" style={{ fontSize: 10, fontWeight: 700, color: col, border: `1px solid ${col}`,
+                padding: "2px 7px", borderRadius: 5, letterSpacing: 1 }}>{String(sev).toUpperCase()}</span>
+            </div>
+            {sel && (c.evidence || []).length > 0 && (
+              <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 5, borderTop: "1px solid var(--line)", paddingTop: 12 }}>
+                {c.evidence.map((ev, i) => <div key={i} className="mono" style={{ fontSize: 12, color: "var(--txt-mid)" }}>{ev}</div>)}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/* Real containment ladder (from SessionReport.containment_simulation — the engine
+ * computed it; the page only renders it, never recomputes §23.13). */
+function RealContainment({ sim }) {
+  if (!sim || !sim.stacked || !sim.stacked.length) return null;
+  const baseline = sim.baseline_score;
+  const floor = sim.residual_floor;
+  return (
+    <div>
+      <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 14 }}>
+        <div className="mono" style={{ fontSize: 11, color: "var(--txt-dim)", letterSpacing: 2 }}>BLAST RADIUS UNDER CONTAINMENT</div>
+        <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+          <span className="mono" style={{ fontSize: 13, color: "var(--txt-dim)", textDecoration: "line-through" }}>{baseline}</span>
+          <span style={{ color: "var(--txt-dim)" }}>→</span>
+          <span className="mono" style={{ fontSize: 30, fontWeight: 700, color: LEVEL_COLOR[BR_LEVEL(floor)] }}>{floor}</span>
+        </div>
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        {sim.stacked.filter((r) => r.control).map((r, i) => (
+          <div key={i} style={{ display: "grid", gridTemplateColumns: "1fr auto auto", gap: 12, alignItems: "center",
+            padding: "11px 14px", borderRadius: 10, background: "var(--surface)", border: "1px solid var(--line)" }}>
+            <span style={{ fontSize: 14, fontWeight: 600 }}>{CONTROL_LABEL[r.control] || r.control}</span>
+            <span className="mono" style={{ fontSize: 12, color: "var(--safe)" }}>−{r.reduction}</span>
+            <span className="mono" style={{ fontSize: 13, color: "var(--txt-mid)", width: 34, textAlign: "right" }}>{r.score}</span>
+          </div>
+        ))}
+      </div>
+      <div style={{ marginTop: 16, padding: "12px 14px", borderRadius: 10, border: "1px dashed var(--line-2)", background: "rgba(255,255,255,.02)" }}>
+        <div className="mono" style={{ fontSize: 11, color: "var(--txt-dim)", letterSpacing: 1, marginBottom: 6 }}>IRREDUCIBLE RESIDUAL · {floor}</div>
+        <div style={{ fontSize: 12.5, color: "var(--txt-mid)", lineHeight: 1.5 }}>
+          {(sim.residual_reasons && sim.residual_reasons.length)
+            ? sim.residual_reasons.join(" · ")
+            : "event-intrinsic risk survives every control — needs human review / server-side enforcement."}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function BR_LEVEL(score) { return window.BR.levelOf(score); }
+
+function RankedSessions() {
+  const BR = window.BR;
+  const sessions = BR.SESSIONS_RANKED;
+  const [sel, setSel] = React.useState(0);
+  const [pickedNode, setPickedNode] = React.useState(null);
+  const [pickedCombo, setPickedCombo] = React.useState(null);
+  const s = sessions[Math.min(sel, sessions.length - 1)];
+
+  const level = s.risk_level;
+  const decision = s.policy_decision;
+  const touched = new Set(s.touched || []);
+  // Map real toxic combos to the catalog for node geometry (constellation paths).
+  const combos = (s.toxic_combinations || []).map((t) => {
+    const meta = BR.COMBOS[t.name] || { name: t.name, nodes: [], sev: t.severity };
+    return Object.assign({}, meta, { name: t.name, sev: t.severity, evidence: t.evidence });
+  });
+  const liveCombos = combos.filter((c) => (c.nodes || []).length >= 2 && c.nodes.every((n) => BR.FINDINGS[n]));
+  const activeFindings = new Set(touched);
+  liveCombos.forEach((c) => c.nodes.forEach((n) => activeFindings.add(n)));
+
+  return (
+    <section style={{ minHeight: "100vh", padding: "20px clamp(16px,3vw,40px) 60px" }}>
+      {/* header — REAL data, no illustrative badge */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 16,
+        padding: "8px 0 22px", borderBottom: "1px solid var(--line)", marginBottom: 20 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+          <div style={{ width: 30, height: 30, borderRadius: "50%", background: "radial-gradient(circle, var(--hot-2), var(--hot) 55%, transparent)" }} />
+          <div>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <span className="mono" style={{ fontSize: 15, fontWeight: 700, letterSpacing: 1 }}>blastradius</span>
+              <span className="mono" style={{ fontSize: 10, fontWeight: 600, color: "var(--safe)", border: "1px solid var(--safe)",
+                padding: "2px 8px", borderRadius: 5, letterSpacing: 0.5 }}>from your scan</span>
+            </div>
+            <div className="mono" style={{ fontSize: 11, color: "var(--txt-dim)" }}>session blast-radius score · top {sessions.length} ranked</div>
+          </div>
+        </div>
+      </div>
+
+      {/* ranked picker */}
+      <div style={{ display: "flex", gap: 8, overflowX: "auto", paddingBottom: 14, marginBottom: 20 }}>
+        {sessions.map((c, i) => {
+          const on = i === sel;
+          const col = LEVEL_COLOR[c.risk_level];
+          return (
+            <button key={c.session_id} onClick={() => { setSel(i); setPickedNode(null); setPickedCombo(null); }}
+              style={{ flex: "0 0 auto", textAlign: "left", borderRadius: 12, padding: "10px 14px", cursor: "pointer",
+                background: on ? "var(--surface-2)" : "var(--surface)", border: `1px solid ${on ? col : "var(--line)"}`,
+                transition: "all .15s", fontFamily: "var(--sans)", color: "var(--txt)", minWidth: 132 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <span className="mono" style={{ fontSize: 11, color: "var(--txt-dim)" }}>#{c.rank}</span>
+                <span className="mono" style={{ fontSize: 22, fontWeight: 700, color: col }}>{c.risk_score}</span>
+                <span className="mono" style={{ fontSize: 10, fontWeight: 700, color: col, letterSpacing: 1 }}>{LEVEL_LABEL[c.risk_level]}</span>
+              </div>
+              <div className="mono" style={{ fontSize: 11, color: "var(--txt-mid)", marginTop: 4, whiteSpace: "nowrap" }}>{c.label}</div>
+              <div className="mono" style={{ fontSize: 10.5, color: "var(--txt-dim)", marginTop: 2 }}>
+                {(c.toxic_combinations || []).length} toxic · {(c.how || []).length} signals
+              </div>
+            </button>
+          );
+        })}
+      </div>
+
+      {/* selected session label */}
+      <div style={{ marginBottom: 18, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+        <span className="mono" style={{ fontSize: 12, color: "var(--txt-dim)" }}>#{s.rank} · session:</span>
+        <span style={{ fontSize: 18, fontWeight: 600 }}>{s.label}</span>
+        <span style={{ color: "var(--txt-dim)", fontSize: 14 }}>— {s.summary}</span>
+      </div>
+
+      {/* main grid */}
+      <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1.55fr) minmax(360px, 1fr)", gap: 24, alignItems: "start" }}>
+        {/* LEFT: constellation + how-it's-risky */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+          <div style={{ position: "relative", background: "radial-gradient(circle at 50% 45%, #0d111a, #07090d 75%)",
+            border: "1px solid var(--line)", borderRadius: 18, aspectRatio: "1.15", minHeight: 380, overflow: "hidden" }}>
+            <Constellation activeFindings={activeFindings} combos={liveCombos} suppressed={new Set()}
+              picked={pickedNode} onPick={(id) => setPickedNode(id)} />
+            <div style={{ position: "absolute", top: 16, left: 18 }}>
+              <div className="mono" style={{ fontSize: 11, color: "var(--txt-dim)", letterSpacing: 2 }}>REACHABLE SURFACE</div>
+              <div style={{ fontSize: 13, color: "var(--txt-mid)", marginTop: 3 }}>
+                <span style={{ color: "var(--hot)" }}>●</span> touched by this session ·
+                <span style={{ color: "var(--txt-dim)" }}> ○ reachable, untouched</span>
+              </div>
+            </div>
+            {pickedNode && <FindingDetail id={pickedNode} onClose={() => setPickedNode(null)} />}
+          </div>
+
+          <div style={{ background: "var(--bg-1)", border: "1px solid var(--line)", borderRadius: 16, padding: "16px 16px 18px" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+              <div className="mono" style={{ fontSize: 12, color: "var(--txt-dim)", letterSpacing: 2 }}>HOW THIS TRANSCRIPT IS RISKY</div>
+              <div className="mono" style={{ fontSize: 12, color: "var(--txt-dim)" }}>{(s.how || []).length} scored signals</div>
+            </div>
+            <HowPanel how={s.how} />
+          </div>
+        </div>
+
+        {/* RIGHT: score + toxic + containment */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+          <div style={{ background: "var(--bg-1)", border: "1px solid var(--line)", borderRadius: 16, padding: "22px 18px 18px" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6, gap: 8 }}>
+              <span className="mono" style={{ fontSize: 12, color: "var(--txt-dim)", letterSpacing: 2 }}>BLAST-RADIUS SCORE</span>
+              <span className="mono" style={{ fontSize: 11, fontWeight: 700, color: DECISION[decision].c,
+                border: `1px solid ${DECISION[decision].c}`, padding: "3px 9px", borderRadius: 6, letterSpacing: 1 }}>
+                {DECISION[decision].t}
+              </span>
+            </div>
+            <ScoreGauge score={s.risk_score} level={level} />
+            <p style={{ fontSize: 13, color: "var(--txt-mid)", lineHeight: 1.55, textAlign: "center", margin: "6px 14px 0" }}>
+              What's reachable is the denominator. What this session actually touched, and how it chains, is the score.
+            </p>
+          </div>
+
+          <div style={{ background: "var(--bg-1)", border: "1px solid var(--line)", borderRadius: 16, padding: "16px 16px 18px" }}>
+            <div className="mono" style={{ fontSize: 12, color: "var(--txt-dim)", letterSpacing: 2, marginBottom: 12 }}>
+              TOXIC COMBINATIONS {liveCombos.length + (s.toxic_combinations || []).length - liveCombos.length > 0 && (s.toxic_combinations || []).length > 0 && <span style={{ color: "var(--crit)" }}>· {(s.toxic_combinations || []).length} active</span>}
+            </div>
+            <RealToxic combos={s.toxic_combinations} picked={pickedCombo} onPick={(n) => setPickedCombo(n)} />
+          </div>
+
+          <div style={{ background: "var(--bg-1)", border: "1px solid var(--line)", borderRadius: 16, padding: "18px 16px" }}>
+            <RealContainment sim={s.containment_simulation} />
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+/* ============================ DASHBOARD (wrapper) ============================ */
+function Dashboard() {
+  const ranked = window.BR.SESSIONS_RANKED;
+  if (ranked && ranked.length) return <RankedSessions />;
+  return <DemoDashboard />;
+}
+
+Object.assign(window, { Dashboard, DemoDashboard, RankedSessions, IllustrativeBadge, ILLUSTRATIVE_NOTE });
